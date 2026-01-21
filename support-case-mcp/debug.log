@@ -1,0 +1,4 @@
+DEBUG SOSL: FIND {Return Order Issue - RO-0017} IN ALL FIELDS RETURNING Case(Id, CaseNumber, Subject, Status, Description)
+DEBUG SOSL: FIND {"Return Order Issue - RO-0017"} IN ALL FIELDS RETURNING Case(Id, CaseNumber, Subject, Status, Description)
+DEBUG SOSL: FIND {Test Subject Hello} IN ALL FIELDS RETURNING Case(Id, CaseNumber, Subject, Status, Description)
+DEBUG SOSL: FIND {Return Order Issue \- RO\-0017} IN ALL FIELDS RETURNING Case(Id, CaseNumber, Subject, Status, Description)

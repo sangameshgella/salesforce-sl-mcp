@@ -1,3 +1,4 @@
 *.env.*
 .env
 Silicon Labs - Use Case.docx
+uv.lock

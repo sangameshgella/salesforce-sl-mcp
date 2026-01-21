@@ -42,11 +42,40 @@ class SalesforceClient:
             print(f"Error fetching case {case_number}: {e}")
             return None
 
+    def _escape_sosl(self, text: str) -> str:
+        """
+        Escapes reserved characters in SOSL search queries.
+        Reserved: ? & | ! { } [ ] ( ) ^ ~ * : \ " ' + -
+        """
+        if not text:
+            return text
+            
+        # List of reserved characters to escape
+        reserved_chars = [
+            '\\', '?', '&', '|', '!', '{', '}', '[', ']', '(', ')', 
+            '^', '~', '*', ':', '"', "'", '+', '-'
+        ]
+        
+        escaped = ""
+        for char in text:
+            if char in reserved_chars:
+                escaped += f"\\{char}"
+            else:
+                escaped += char
+        return escaped
+
     def search_cases(self, query_text: str) -> List[Dict[str, Any]]:
         self.connect()
         try:
-            # SOSL Search
-            sosl = f"FIND {{{query_text}}} IN ALL FIELDS RETURNING Case(Id, CaseNumber, Subject, Status)"
+            # Sanitize user input
+            escaped_query = self._escape_sosl(query_text)
+            
+            # Use braces match with escaped content
+            sosl = f"FIND {{{escaped_query}}} IN ALL FIELDS RETURNING Case(Id, CaseNumber, Subject, Status, Description)"
+            
+            with open("debug.log", "a") as f:
+                f.write(f"DEBUG SOSL: {sosl}\n")
+
             result = self.sf.search(sosl)
             return result.get('searchRecords', [])
         except Exception as e:

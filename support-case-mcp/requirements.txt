@@ -1,0 +1,4 @@
+mcp[cli]>=1.0.0
+simple-salesforce>=1.12.5
+python-dotenv>=1.0.0
+uvicorn>=0.20.0

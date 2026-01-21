@@ -1,5 +1,5 @@
 from mcp.server.fastmcp import FastMCP
-from support_case_mcp.salesforce_client import SalesforceClient
+from salesforce_client import SalesforceClient
 
 # Initialize FastMCP Server
 mcp = FastMCP("Support Case MCP")
@@ -46,7 +46,13 @@ def search_cases(query_string: str) -> str:
     
     output = [f"Found {len(results)} cases:"]
     for r in results:
+        desc_snippet = (r.get('Description') or "")[:100].replace('\n', ' ')
+        if len(r.get('Description') or "") > 100:
+            desc_snippet += "..."
+            
         output.append(f"- [{r['CaseNumber']}] {r['Subject']} ({r['Status']})")
+        if desc_snippet:
+             output.append(f"  Snippet: {desc_snippet}")
         
     return "\n".join(output)
 
