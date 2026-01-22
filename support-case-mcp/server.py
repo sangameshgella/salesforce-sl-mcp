@@ -338,26 +338,27 @@ Case Reference: {case_info['CaseNumber']}"""
 session_manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True)
 
 
-async def mcp_app(scope, receive, send):
-    headers = list(scope.get("headers") or [])
-    header_names = {k.lower() for k, _ in headers}
-    if b"accept" not in header_names:
-        headers.append((b"accept", b"application/json"))
-    if scope.get("method") == "POST" and b"content-type" not in header_names:
-        headers.append((b"content-type", b"application/json"))
-    if headers != list(scope.get("headers") or []):
-        scope = dict(scope)
-        scope["headers"] = headers
-    try:
-        await session_manager.handle_request(scope, receive, send)
-    except Exception:
-        logger.exception(
-            "mcp_app error: method=%s path=%s headers=%s",
-            scope.get("method"),
-            scope.get("path"),
-            [(k.decode(), v.decode()) for k, v in headers],
-        )
-        raise
+class McpEndpoint:
+    async def __call__(self, scope, receive, send):
+        headers = list(scope.get("headers") or [])
+        header_names = {k.lower() for k, _ in headers}
+        if b"accept" not in header_names:
+            headers.append((b"accept", b"application/json"))
+        if scope.get("method") == "POST" and b"content-type" not in header_names:
+            headers.append((b"content-type", b"application/json"))
+        if headers != list(scope.get("headers") or []):
+            scope = dict(scope)
+            scope["headers"] = headers
+        try:
+            await session_manager.handle_request(scope, receive, send)
+        except Exception:
+            logger.exception(
+                "mcp_app error: method=%s path=%s headers=%s",
+                scope.get("method"),
+                scope.get("path"),
+                [(k.decode(), v.decode()) for k, v in headers],
+            )
+            raise
 
 
 @asynccontextmanager
@@ -372,8 +373,8 @@ async def handle_home(request: Request):
 
 
 routes = [
-    Route("/mcp", endpoint=mcp_app, methods=["GET", "POST", "DELETE"]),
-    Route("/mcp/", endpoint=mcp_app, methods=["GET", "POST", "DELETE"]),
+    Route("/mcp", endpoint=McpEndpoint(), methods=["GET", "POST", "DELETE"]),
+    Route("/mcp/", endpoint=McpEndpoint(), methods=["GET", "POST", "DELETE"]),
     Route("/", endpoint=handle_home),
 ]
 
