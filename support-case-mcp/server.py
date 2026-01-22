@@ -22,13 +22,11 @@ server = Server("support-case-mcp")
 @server.list_tools()
 async def list_tools():
     logger.info("list_tools invoked")
-    return {
-        "tools": [
+    return [
         {
             "name": "get_case_details",
             "description": "Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
-            "input_schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number (not Id)"}
@@ -40,8 +38,7 @@ async def list_tools():
         {
             "name": "search_cases",
             "description": "Search for support cases using a keyword or phrase. Returns matching cases with snippets.",
-            "input_schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query_string": {"type": "string", "description": "Keywords to search for"}
@@ -53,8 +50,7 @@ async def list_tools():
         {
             "name": "get_case_history",
             "description": "Get the history of field changes for a case. Shows what modifications were made, when, and by whom.",
-            "input_schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"}
@@ -66,8 +62,7 @@ async def list_tools():
         {
             "name": "get_case_timeline",
             "description": "Get the activity feed/timeline for a case. Shows posts, updates, and activities.",
-            "input_schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"}
@@ -79,8 +74,7 @@ async def list_tools():
         {
             "name": "get_case_summary",
             "description": "Get comprehensive case data for follow-up inquiries. Returns case info, fix status, validation status, history, and recent comments. Use this for customer follow-up questions about case status.",
-            "input_schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"}
@@ -92,8 +86,7 @@ async def list_tools():
         {
             "name": "suggest_knowledge_article",
             "description": "Check if a resolved case is suitable for conversion to a Knowledge Article (KBA). Returns eligibility and suggested prompt.",
-            "input_schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "inputSchema": {
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"}
@@ -103,7 +96,6 @@ async def list_tools():
             }
         },
     ]
-    }
 
 @server.call_tool()
 async def call_tool(name, arguments):
@@ -278,7 +270,7 @@ Case Reference: {case_info['CaseNumber']}"""
     raise ValueError(f"Tool {name} not found")
 
 # Streamable HTTP transport/session manager
-session_manager = StreamableHTTPSessionManager(server)
+session_manager = StreamableHTTPSessionManager(server, stateless=True)
 
 
 async def mcp_app(scope, receive, send):
