@@ -117,6 +117,68 @@ async def list_tools():
                 "required": ["case_number"],
             },
         ),
+        # ========== AI Summary Tools ==========
+        Tool(
+            name="get_case_emails",
+            description="Get all email messages linked to a case. Returns email details including sender, recipient, subject, body, and date.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="get_case_for_ai_summary",
+            description="Get case data optimized for AI summary generation. Returns case description plus all email messages and comments in a structured format ready for LLM summarization.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="update_case_ai_summary",
+            description="Save an AI-generated summary to the Case Summary (AI) field in Salesforce. Use this after generating a summary from case data.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_number": {"type": "string", "description": "The Case Number"},
+                    "summary": {"type": "string", "description": "The AI-generated summary text to save"}
+                },
+                "required": ["case_number", "summary"],
+            },
+        ),
+        # ========== Knowledge Article Tools ==========
+        Tool(
+            name="search_knowledge_articles",
+            description="Search Knowledge Base Articles by keyword or phrase. Returns matching articles with title, article number, summary, and URL.",
+            inputSchema={
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "Search keywords or phrase"}},
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_knowledge_article",
+            description="Get full details of a Knowledge Article by its Article Number (e.g., 000005271). Returns title, summary, and full content for AI summarization.",
+            inputSchema={
+                "type": "object",
+                "properties": {"article_number": {"type": "string", "description": "The Article Number (e.g., 000005271)"}},
+                "required": ["article_number"],
+            },
+        ),
+        Tool(
+            name="update_kba_summary",
+            description="Save an AI-generated summary to a Knowledge Article's Summary field. Use this after generating a summary from article content.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "article_number": {"type": "string", "description": "The Article Number"},
+                    "summary": {"type": "string", "description": "The AI-generated summary text to save"}
+                },
+                "required": ["article_number", "summary"],
+            },
+        ),
     ]
 
 @server.call_tool()
@@ -353,6 +415,160 @@ Case Reference: {case_info['CaseNumber']}"""
             output.append(f"- {ka.get('Title', 'Untitled')} ({ka.get('UrlName', '')})")
         
         return [{"type": "text", "text": "\n".join(output)}]
+
+    # ========== AI Summary Tool Handlers ==========
+
+    elif name == "get_case_emails":
+        case_number = arguments.get("case_number")
+        case = sf_client.get_case(case_number)
+        if not case:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
+        
+        emails = sf_client.get_case_emails(case['Id'])
+        if not emails:
+            return [{"type": "text", "text": f"No email messages found for case {case_number}."}]
+        
+        output = [f"Email Messages for Case {case_number}:", f"Total: {len(emails)} emails", ""]
+        for email in emails:
+            direction = "INBOUND" if email.get('Incoming') else "OUTBOUND"
+            output.append(f"[{email.get('MessageDate')}] [{direction}]")
+            output.append(f"  From: {email.get('FromAddress')}")
+            output.append(f"  To: {email.get('ToAddress')}")
+            output.append(f"  Subject: {email.get('Subject')}")
+            body = email.get('TextBody') or email.get('HtmlBody', '')
+            if body:
+                # Truncate long bodies for display
+                body_preview = body[:500].replace('\n', ' ')
+                if len(body) > 500:
+                    body_preview += "..."
+                output.append(f"  Body: {body_preview}")
+            output.append("")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "get_case_for_ai_summary":
+        case_number = arguments.get("case_number")
+        data = sf_client.get_case_for_ai_summary(case_number)
+        if not data:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
+        
+        # Format the data for AI consumption
+        output = [
+            "=== CASE DATA FOR AI SUMMARY GENERATION ===",
+            "",
+            f"Case Number: {data['case_number']}",
+            f"Subject: {data['subject']}",
+            f"Status: {data['status']}",
+            f"Priority: {data['priority']}",
+            f"Contact: {data['contact_name'] or 'N/A'}",
+            "",
+            "--- CASE DESCRIPTION ---",
+            data['description'] or '(No description provided)',
+            "",
+            f"--- EMAIL MESSAGES ({data['email_count']} total) ---"
+        ]
+        
+        for i, email in enumerate(data['emails'], 1):
+            output.append(f"\n[Email {i}] [{email['direction'].upper()}] {email['date']}")
+            output.append(f"From: {email['from']}")
+            output.append(f"To: {email['to']}")
+            output.append(f"Subject: {email['subject']}")
+            output.append(f"Body:\n{email['body']}")
+        
+        if data['comments']:
+            output.append(f"\n--- CASE COMMENTS ({data['comment_count']} total) ---")
+            for i, comment in enumerate(data['comments'], 1):
+                output.append(f"\n[Comment {i}] {comment['date']} - {comment['author']}")
+                output.append(comment['body'])
+        
+        output.append("\n" + "=" * 50)
+        output.append("Please generate a comprehensive AI summary based on the above case data.")
+        output.append("Include: key issues, resolution steps taken, current status, and any follow-up actions.")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "update_case_ai_summary":
+        case_number = arguments.get("case_number")
+        summary = arguments.get("summary")
+        
+        if not summary:
+            return [{"type": "text", "text": "Error: Summary text is required."}]
+        
+        result = sf_client.update_case_ai_summary(case_number, summary)
+        
+        if result['success']:
+            return [{"type": "text", "text": f"Successfully updated AI Summary for case {case_number}.\nCase ID: {result['case_id']}"}]
+        else:
+            return [{"type": "text", "text": f"Failed to update AI Summary: {result['error']}"}]
+
+    # ========== Knowledge Article Tool Handlers ==========
+
+    elif name == "search_knowledge_articles":
+        query = arguments.get("query")
+        if not query:
+            return [{"type": "text", "text": "Error: Search query is required."}]
+        
+        articles = sf_client.search_knowledge_articles(query)
+        if not articles:
+            return [{"type": "text", "text": f"No knowledge articles found matching '{query}'."}]
+        
+        output = [f"Found {len(articles)} Knowledge Articles:", ""]
+        for article in articles:
+            output.append(f"[{article['article_number']}] {article['title']}")
+            if article.get('summary'):
+                summary_preview = article['summary'][:200].replace('\n', ' ')
+                if len(article['summary']) > 200:
+                    summary_preview += "..."
+                output.append(f"  Summary: {summary_preview}")
+            output.append(f"  URL: {article.get('url_name', 'N/A')}")
+            output.append(f"  Last Modified: {article.get('last_modified', 'N/A')}")
+            output.append("")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "get_knowledge_article":
+        article_number = arguments.get("article_number")
+        article = sf_client.get_knowledge_article(article_number)
+        if not article:
+            return [{"type": "text", "text": f"Knowledge Article {article_number} not found."}]
+        
+        output = [
+            "=== KNOWLEDGE ARTICLE DATA FOR AI SUMMARY GENERATION ===",
+            "",
+            f"Article Number: {article['article_number']}",
+            f"Title: {article['title']}",
+            f"Article Type: {article.get('article_type', 'N/A')}",
+            f"Version: {article.get('version', 'N/A')}",
+            f"Status: {article.get('publish_status', 'N/A')}",
+            f"Created: {article.get('created_date', 'N/A')}",
+            f"Last Modified: {article.get('last_modified', 'N/A')}",
+            "",
+            "--- CURRENT SUMMARY ---",
+            article.get('summary') or '(No summary)',
+            "",
+            "--- ARTICLE DETAILS/CONTENT ---",
+            article.get('details') or '(No detailed content available - may need to query specific article type fields)',
+            "",
+            "=" * 50,
+            "Please generate or update the AI summary based on the above article content."
+        ]
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "update_kba_summary":
+        article_number = arguments.get("article_number")
+        summary = arguments.get("summary")
+        
+        if not summary:
+            return [{"type": "text", "text": "Error: Summary text is required."}]
+        
+        result = sf_client.update_kba_summary(article_number, summary)
+        
+        if result['success']:
+            return [{"type": "text", "text": f"Successfully updated Summary for article {article_number}.\nTitle: {result['title']}\nArticle ID: {result['article_id']}"}]
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            return [{"type": "text", "text": f"Failed to update KBA Summary: {error_msg}"}]
 
     raise ValueError(f"Tool {name} not found")
 
