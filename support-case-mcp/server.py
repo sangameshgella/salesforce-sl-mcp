@@ -10,6 +10,7 @@ from salesforce_client import SalesforceClient
 
 # Initialize Salesforce Client
 sf_client = SalesforceClient()
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp.sse")
 
 # Initialize Standard MCP Server
