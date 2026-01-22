@@ -91,3 +91,100 @@ class SalesforceClient:
         except Exception as e:
              print(f"Error fetching comments for {case_id}: {e}")
              return []
+
+    def get_case_history(self, case_id: str) -> List[Dict[str, Any]]:
+        """Fetch case field change history to show what changes were made"""
+        self.connect()
+        try:
+            query = f"""
+                SELECT Field, OldValue, NewValue, CreatedDate, CreatedBy.Name 
+                FROM CaseHistory 
+                WHERE CaseId = '{case_id}' 
+                ORDER BY CreatedDate DESC 
+                LIMIT 20
+            """
+            result = self.sf.query(query)
+            return result.get('records', [])
+        except Exception as e:
+            print(f"Error fetching history for {case_id}: {e}")
+            return []
+
+    def get_case_feed(self, case_id: str) -> List[Dict[str, Any]]:
+        """Fetch case feed items (posts, activities, updates)"""
+        self.connect()
+        try:
+            query = f"""
+                SELECT Body, Type, CreatedDate, CreatedBy.Name 
+                FROM CaseFeed 
+                WHERE ParentId = '{case_id}' 
+                ORDER BY CreatedDate DESC
+                LIMIT 20
+            """
+            result = self.sf.query(query)
+            return result.get('records', [])
+        except Exception as e:
+            print(f"Error fetching feed for {case_id}: {e}")
+            return []
+
+    def get_case_with_status(self, case_number: str) -> Optional[Dict[str, Any]]:
+        """Get case with custom status fields for fix/validation tracking"""
+        self.connect()
+        try:
+            query = f"""
+                SELECT Id, CaseNumber, Subject, Description, Status, Priority, 
+                       Contact.Name, CreatedDate, LastModifiedDate,
+                       Fix_Status__c, Validation_Status__c
+                FROM Case 
+                WHERE CaseNumber = '{case_number}' 
+                LIMIT 1
+            """
+            result = self.sf.query(query)
+            if result['totalSize'] > 0:
+                return result['records'][0]
+            return None
+        except Exception as e:
+            print(f"Error fetching case with status {case_number}: {e}")
+            return None
+
+    def get_case_summary_data(self, case_number: str) -> Optional[Dict[str, Any]]:
+        """Get comprehensive case data for AI summarization"""
+        case = self.get_case_with_status(case_number)
+        if not case:
+            return None
+        
+        case_id = case['Id']
+        history = self.get_case_history(case_id)
+        comments = self.get_case_comments(case_id)
+        feed = self.get_case_feed(case_id)
+        
+        # Determine closure readiness based on status fields
+        fix_status = case.get('Fix_Status__c', '')
+        validation_status = case.get('Validation_Status__c', '')
+        
+        if fix_status == 'Implemented' and validation_status == 'Completed':
+            closure_readiness = 'ready'
+        elif fix_status == 'Implemented':
+            closure_readiness = 'pending_validation'
+        else:
+            closure_readiness = 'in_progress'
+        
+        return {
+            'case_info': {
+                'CaseNumber': case['CaseNumber'],
+                'Subject': case['Subject'],
+                'Description': case['Description'],
+                'Status': case['Status'],
+                'Priority': case['Priority'],
+                'CreatedDate': case.get('CreatedDate'),
+                'LastModifiedDate': case.get('LastModifiedDate'),
+                'ContactName': case.get('Contact', {}).get('Name') if case.get('Contact') else None
+            },
+            'technical_summary': {
+                'fix_status': fix_status,
+                'validation_status': validation_status,
+                'closure_readiness': closure_readiness
+            },
+            'history': history[:10],  # Last 10 changes
+            'recent_comments': comments[:5],  # Last 5 comments
+            'feed_items': feed[:10]  # Last 10 feed items
+        }
