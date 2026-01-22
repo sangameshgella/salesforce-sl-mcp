@@ -275,6 +275,7 @@ async def handle_home(request: Request):
 routes = [
     Route("/sse", endpoint=SseEndpoint(), methods=["GET"]),
     Route("/messages", endpoint=PostMessageEndpoint(), methods=["POST"]),
+    Route("/sse/messages", endpoint=PostMessageEndpoint(), methods=["POST"]),
     Route("/", endpoint=handle_home),
 ]
 
