@@ -279,7 +279,7 @@ Case Reference: {case_info['CaseNumber']}"""
     raise ValueError(f"Tool {name} not found")
 
 # Streamable HTTP transport/session manager
-session_manager = StreamableHTTPSessionManager(server, stateless=True)
+session_manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True)
 
 
 async def mcp_app(scope, receive, send):
