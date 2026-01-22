@@ -2,6 +2,8 @@ import sys
 import logging
 from contextlib import asynccontextmanager
 
+import mcp
+
 from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
@@ -15,6 +17,7 @@ from salesforce_client import SalesforceClient
 sf_client = SalesforceClient()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp.sse")
+logger.info("MCP VERSION: %s", getattr(mcp, "__version__", "unknown"))
 
 # Initialize Standard MCP Server
 server = Server("support-case-mcp")
@@ -22,28 +25,27 @@ server = Server("support-case-mcp")
 @server.list_tools()
 async def list_tools():
     logger.info("list_tools invoked - MINIMAL")
-    return {
-        "tools": [
-            {
-                "name": "search",
-                "description": "test",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
-                },
+    from mcp.types import Tool
+    return [
+        Tool(
+            name="search",
+            description="test",
+            inputSchema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
             },
-            {
-                "name": "fetch",
-                "description": "test",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"id": {"type": "string"}},
-                    "required": ["id"],
-                },
+        ),
+        Tool(
+            name="fetch",
+            description="test",
+            inputSchema={
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": ["id"],
             },
-        ],
-    }
+        ),
+    ]
 
 @server.call_tool()
 async def call_tool(name, arguments):
@@ -255,6 +257,7 @@ session_manager = StreamableHTTPSessionManager(server, stateless=True, json_resp
 
 class McpEndpoint:
     async def __call__(self, scope, receive, send):
+        logger.info("MCP REQUEST: %s %s", scope.get("method"), scope.get("path"))
         headers = list(scope.get("headers") or [])
         header_names = {k.lower() for k, _ in headers}
         if b"accept" not in header_names:
@@ -264,8 +267,17 @@ class McpEndpoint:
         if headers != list(scope.get("headers") or []):
             scope = dict(scope)
             scope["headers"] = headers
+
+        async def receive_with_log():
+            message = await receive()
+            if message.get("type") == "http.request":
+                body = message.get("body") or b""
+                if body:
+                    logger.info("REQUEST BODY: %s", body.decode(errors="replace"))
+            return message
+
         try:
-            await session_manager.handle_request(scope, receive, send)
+            await session_manager.handle_request(scope, receive_with_log, send)
         except Exception:
             logger.exception(
                 "mcp_app error: method=%s path=%s headers=%s",
