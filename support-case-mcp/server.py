@@ -39,19 +39,11 @@ async def list_tools():
                 {"query": {"type": "string", "description": "Search query string"}},
                 ["query"],
             ),
-            "input_schema": _schema(
-                {"query": {"type": "string", "description": "Search query string"}},
-                ["query"],
-            ),
         },
         {
             "name": "fetch",
             "description": "Fetch full details for a support case by case number.",
             "inputSchema": _schema(
-                {"id": {"type": "string", "description": "Case Number (not Id)"}},
-                ["id"],
-            ),
-            "input_schema": _schema(
                 {"id": {"type": "string", "description": "Case Number (not Id)"}},
                 ["id"],
             ),
@@ -63,19 +55,11 @@ async def list_tools():
                 {"case_number": {"type": "string", "description": "The Case Number (not Id)"}},
                 ["case_number"],
             ),
-            "input_schema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number (not Id)"}},
-                ["case_number"],
-            ),
         },
         {
             "name": "search_cases",
             "description": "Search for support cases using a keyword or phrase. Returns matching cases with snippets.",
             "inputSchema": _schema(
-                {"query_string": {"type": "string", "description": "Keywords to search for"}},
-                ["query_string"],
-            ),
-            "input_schema": _schema(
                 {"query_string": {"type": "string", "description": "Keywords to search for"}},
                 ["query_string"],
             ),
@@ -87,19 +71,11 @@ async def list_tools():
                 {"case_number": {"type": "string", "description": "The Case Number"}},
                 ["case_number"],
             ),
-            "input_schema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number"}},
-                ["case_number"],
-            ),
         },
         {
             "name": "get_case_timeline",
             "description": "Get the activity feed/timeline for a case. Shows posts, updates, and activities.",
             "inputSchema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number"}},
-                ["case_number"],
-            ),
-            "input_schema": _schema(
                 {"case_number": {"type": "string", "description": "The Case Number"}},
                 ["case_number"],
             ),
@@ -111,19 +87,11 @@ async def list_tools():
                 {"case_number": {"type": "string", "description": "The Case Number"}},
                 ["case_number"],
             ),
-            "input_schema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number"}},
-                ["case_number"],
-            ),
         },
         {
             "name": "suggest_knowledge_article",
             "description": "Check if a resolved case is suitable for conversion to a Knowledge Article (KBA). Returns eligibility and suggested prompt.",
             "inputSchema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number"}},
-                ["case_number"],
-            ),
-            "input_schema": _schema(
                 {"case_number": {"type": "string", "description": "The Case Number"}},
                 ["case_number"],
             ),
