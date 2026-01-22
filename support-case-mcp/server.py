@@ -24,25 +24,79 @@ server = Server("support-case-mcp")
 
 @server.list_tools()
 async def list_tools():
-    logger.info("list_tools invoked - MINIMAL")
+    logger.info("list_tools invoked")
     from mcp.types import Tool
     return [
         Tool(
             name="search",
-            description="test",
+            description="Search for support cases by keyword or phrase. Returns matching cases.",
             inputSchema={
                 "type": "object",
-                "properties": {"query": {"type": "string"}},
+                "properties": {"query": {"type": "string", "description": "Search query string"}},
                 "required": ["query"],
             },
         ),
         Tool(
             name="fetch",
-            description="test",
+            description="Fetch full details for a support case by case number.",
             inputSchema={
                 "type": "object",
-                "properties": {"id": {"type": "string"}},
+                "properties": {"id": {"type": "string", "description": "Case Number (not Id)"}},
                 "required": ["id"],
+            },
+        ),
+        Tool(
+            name="get_case_details",
+            description="Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number (not Id)"}},
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="search_cases",
+            description="Search for support cases using a keyword or phrase. Returns matching cases with snippets.",
+            inputSchema={
+                "type": "object",
+                "properties": {"query_string": {"type": "string", "description": "Keywords to search for"}},
+                "required": ["query_string"],
+            },
+        ),
+        Tool(
+            name="get_case_history",
+            description="Get the history of field changes for a case. Shows what modifications were made, when, and by whom.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="get_case_timeline",
+            description="Get the activity feed/timeline for a case. Shows posts, updates, and activities.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="get_related_cases",
+            description="Find cases related to the given case. Useful for identifying patterns or duplicate issues.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="get_case_articles",
+            description="Get knowledge articles attached to or suggested for a case.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
+                "required": ["case_number"],
             },
         ),
     ]
