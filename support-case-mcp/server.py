@@ -348,7 +348,16 @@ async def mcp_app(scope, receive, send):
     if headers != list(scope.get("headers") or []):
         scope = dict(scope)
         scope["headers"] = headers
-    await session_manager.handle_request(scope, receive, send)
+    try:
+        await session_manager.handle_request(scope, receive, send)
+    except Exception:
+        logger.exception(
+            "mcp_app error: method=%s path=%s headers=%s",
+            scope.get("method"),
+            scope.get("path"),
+            [(k.decode(), v.decode()) for k, v in headers],
+        )
+        raise
 
 
 @asynccontextmanager
