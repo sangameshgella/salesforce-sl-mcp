@@ -258,17 +258,23 @@ Case Reference: {case_info['CaseNumber']}"""
 # Create SSE Transport handler
 sse = SseServerTransport("/messages")
 
-async def handle_sse(scope, receive, send):
-    async with sse.connect_sse(scope, receive, send) as streams:
-        await server.run(streams[0], streams[1], server.create_initialization_options())
+class SseEndpoint:
+    async def __call__(self, scope, receive, send):
+        async with sse.connect_sse(scope, receive, send) as streams:
+            await server.run(streams[0], streams[1], server.create_initialization_options())
+
+
+class PostMessageEndpoint:
+    async def __call__(self, scope, receive, send):
+        await sse.handle_post_message(scope, receive, send)
 
 # Create Starlette App (This is what Uvicorn runs)
 async def handle_home(request: Request):
     return Response("MCP Server Running. Use /sse endpoint for connection.")
 
 routes = [
-    Route("/sse", endpoint=handle_sse, methods=["GET"]),
-    Route("/messages", endpoint=sse.handle_post_message, methods=["POST"]),
+    Route("/sse", endpoint=SseEndpoint(), methods=["GET"]),
+    Route("/messages", endpoint=PostMessageEndpoint(), methods=["POST"]),
     Route("/", endpoint=handle_home),
 ]
 
