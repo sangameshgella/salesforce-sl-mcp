@@ -22,78 +22,87 @@ server = Server("support-case-mcp")
 @server.list_tools()
 async def list_tools():
     logger.info("list_tools invoked")
+    def _schema(properties, required):
+        return {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
+
     return [
         {
             "name": "get_case_details",
             "description": "Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "case_number": {"type": "string", "description": "The Case Number (not Id)"}
-                },
-                "required": ["case_number"],
-                "additionalProperties": False
-            }
+            "inputSchema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number (not Id)"}},
+                ["case_number"],
+            ),
+            "input_schema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number (not Id)"}},
+                ["case_number"],
+            ),
         },
         {
             "name": "search_cases",
             "description": "Search for support cases using a keyword or phrase. Returns matching cases with snippets.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query_string": {"type": "string", "description": "Keywords to search for"}
-                },
-                "required": ["query_string"],
-                "additionalProperties": False
-            }
+            "inputSchema": _schema(
+                {"query_string": {"type": "string", "description": "Keywords to search for"}},
+                ["query_string"],
+            ),
+            "input_schema": _schema(
+                {"query_string": {"type": "string", "description": "Keywords to search for"}},
+                ["query_string"],
+            ),
         },
         {
             "name": "get_case_history",
             "description": "Get the history of field changes for a case. Shows what modifications were made, when, and by whom.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "case_number": {"type": "string", "description": "The Case Number"}
-                },
-                "required": ["case_number"],
-                "additionalProperties": False
-            }
+            "inputSchema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number"}},
+                ["case_number"],
+            ),
+            "input_schema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number"}},
+                ["case_number"],
+            ),
         },
         {
             "name": "get_case_timeline",
             "description": "Get the activity feed/timeline for a case. Shows posts, updates, and activities.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "case_number": {"type": "string", "description": "The Case Number"}
-                },
-                "required": ["case_number"],
-                "additionalProperties": False
-            }
+            "inputSchema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number"}},
+                ["case_number"],
+            ),
+            "input_schema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number"}},
+                ["case_number"],
+            ),
         },
         {
             "name": "get_case_summary",
             "description": "Get comprehensive case data for follow-up inquiries. Returns case info, fix status, validation status, history, and recent comments. Use this for customer follow-up questions about case status.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "case_number": {"type": "string", "description": "The Case Number"}
-                },
-                "required": ["case_number"],
-                "additionalProperties": False
-            }
+            "inputSchema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number"}},
+                ["case_number"],
+            ),
+            "input_schema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number"}},
+                ["case_number"],
+            ),
         },
         {
             "name": "suggest_knowledge_article",
             "description": "Check if a resolved case is suitable for conversion to a Knowledge Article (KBA). Returns eligibility and suggested prompt.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "case_number": {"type": "string", "description": "The Case Number"}
-                },
-                "required": ["case_number"],
-                "additionalProperties": False
-            }
+            "inputSchema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number"}},
+                ["case_number"],
+            ),
+            "input_schema": _schema(
+                {"case_number": {"type": "string", "description": "The Case Number"}},
+                ["case_number"],
+            ),
         },
     ]
 
@@ -289,7 +298,8 @@ async def handle_home(request: Request):
 
 
 routes = [
-    Mount("/mcp", app=mcp_app),
+    Route("/mcp", endpoint=mcp_app, methods=["GET", "POST", "DELETE"]),
+    Route("/mcp/", endpoint=mcp_app, methods=["GET", "POST", "DELETE"]),
     Route("/", endpoint=handle_home),
 ]
 
