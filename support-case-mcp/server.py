@@ -17,6 +17,7 @@ server = Server("support-case-mcp")
 
 @server.list_tools()
 async def list_tools():
+    logger.info("list_tools invoked")
     return [
         {
             "name": "get_case_details",
@@ -88,6 +89,7 @@ async def list_tools():
 
 @server.call_tool()
 async def call_tool(name, arguments):
+    logger.info("call_tool invoked: %s", name)
     if name == "get_case_details":
         case_number = arguments.get("case_number")
         case = sf_client.get_case(case_number)
@@ -264,7 +266,11 @@ class SseEndpoint:
     async def __call__(self, scope, receive, send):
         logger.info("SSE connect: path=%s query=%s", scope.get("path"), scope.get("query_string"))
         async with sse.connect_sse(scope, receive, send) as streams:
-            await server.run(streams[0], streams[1], server.create_initialization_options())
+            try:
+                await server.run(streams[0], streams[1], server.create_initialization_options())
+            except Exception:
+                logger.exception("server.run failed")
+                raise
 
 
 class PostMessageEndpoint:
