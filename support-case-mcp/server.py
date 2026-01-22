@@ -30,8 +30,7 @@ async def list_tools():
             "additionalProperties": False,
         }
 
-    return {
-        "tools": [
+    tools = [
         {
             "name": "search",
             "description": "Search for support cases by keyword or phrase. Returns matching cases.",
@@ -97,7 +96,8 @@ async def list_tools():
             ),
         },
     ]
-    }
+    logger.info("list_tools returns list=%s first_keys=%s", isinstance(tools, list), list(tools[0].keys()))
+    return {"tools": tools}
 
 @server.call_tool()
 async def call_tool(name, arguments):
