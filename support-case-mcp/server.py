@@ -27,89 +27,105 @@ async def list_tools():
         {
             "name": "search",
             "description": "Search for support cases by keyword or phrase. Returns matching cases.",
-            "inputSchema": {
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query string"}
                 },
-                "required": ["query"]
+                "required": ["query"],
+                "additionalProperties": False
             }
         },
         {
             "name": "fetch",
             "description": "Fetch full details for a support case by case number.",
-            "inputSchema": {
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "id": {"type": "string", "description": "Case Number (not Id)"}
                 },
-                "required": ["id"]
+                "required": ["id"],
+                "additionalProperties": False
             }
         },
         {
             "name": "get_case_details",
             "description": "Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
-            "inputSchema": {
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number (not Id)"}
                 },
-                "required": ["case_number"]
+                "required": ["case_number"],
+                "additionalProperties": False
             }
         },
         {
             "name": "search_cases",
             "description": "Search for support cases using a keyword or phrase. Returns matching cases with snippets.",
-            "inputSchema": {
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "query_string": {"type": "string", "description": "Keywords to search for"}
                 },
-                "required": ["query_string"]
+                "required": ["query_string"],
+                "additionalProperties": False
             }
         },
         {
             "name": "get_case_history",
             "description": "Get the history of field changes for a case. Shows what modifications were made, when, and by whom.",
-            "inputSchema": {
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"}
                 },
-                "required": ["case_number"]
+                "required": ["case_number"],
+                "additionalProperties": False
             }
         },
         {
             "name": "get_case_timeline",
             "description": "Get the activity feed/timeline for a case. Shows posts, updates, and activities.",
-            "inputSchema": {
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"}
                 },
-                "required": ["case_number"]
+                "required": ["case_number"],
+                "additionalProperties": False
             }
         },
         {
             "name": "get_case_summary",
             "description": "Get comprehensive case data for follow-up inquiries. Returns case info, fix status, validation status, history, and recent comments. Use this for customer follow-up questions about case status.",
-            "inputSchema": {
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"}
                 },
-                "required": ["case_number"]
+                "required": ["case_number"],
+                "additionalProperties": False
             }
         },
         {
             "name": "suggest_knowledge_article",
             "description": "Check if a resolved case is suitable for conversion to a Knowledge Article (KBA). Returns eligibility and suggested prompt.",
-            "inputSchema": {
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"}
                 },
-                "required": ["case_number"]
+                "required": ["case_number"],
+                "additionalProperties": False
             }
         },
     ]
