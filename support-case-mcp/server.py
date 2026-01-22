@@ -25,32 +25,6 @@ async def list_tools():
     return {
         "tools": [
         {
-            "name": "search",
-            "description": "Search for support cases by keyword or phrase. Returns matching cases.",
-            "input_schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query string"}
-                },
-                "required": ["query"],
-                "additionalProperties": False
-            }
-        },
-        {
-            "name": "fetch",
-            "description": "Fetch full details for a support case by case number.",
-            "input_schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string", "description": "Case Number (not Id)"}
-                },
-                "required": ["id"],
-                "additionalProperties": False
-            }
-        },
-        {
             "name": "get_case_details",
             "description": "Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
             "input_schema": {
@@ -134,39 +108,7 @@ async def list_tools():
 @server.call_tool()
 async def call_tool(name, arguments):
     logger.info("call_tool invoked: %s", name)
-    if name == "search":
-        query = arguments.get("query")
-        results = sf_client.search_cases(query)
-        if not results:
-            return [{"type": "text", "text": "No cases found matching that query."}]
-
-        output = []
-        for r in results:
-            output.append(f"{r['CaseNumber']}: {r['Subject']} ({r['Status']})")
-
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "fetch":
-        case_number = arguments.get("id")
-        case = sf_client.get_case(case_number)
-        if not case:
-            return [{"type": "text", "text": f"Case {case_number} not found."}]
-
-        comments = sf_client.get_case_comments(case['Id'])
-        output = [
-            f"Case: {case['CaseNumber']}",
-            f"Subject: {case['Subject']}",
-            f"Status: {case['Status']}",
-            f"Priority: {case['Priority']}",
-            f"Description: {case['Description']}",
-            "\n--- Recent Comments ---"
-        ]
-        for c in comments:
-            output.append(f"[{c['CreatedDate']}] {c['CreatedBy']['Name']}: {c['CommentBody']}")
-
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "get_case_details":
+    if name == "get_case_details":
         case_number = arguments.get("case_number")
         case = sf_client.get_case(case_number)
         if not case:
