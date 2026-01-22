@@ -99,6 +99,24 @@ async def list_tools():
                 "required": ["case_number"],
             },
         ),
+        Tool(
+            name="get_case_summary",
+            description="Get a comprehensive summary of a case including fix status, validation status, closure readiness, recent changes, and comments.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="suggest_knowledge_article",
+            description="Check if a resolved case is eligible to be converted into a Knowledge Article (KBA) for future reference.",
+            inputSchema={
+                "type": "object",
+                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
+                "required": ["case_number"],
+            },
+        ),
     ]
 
 @server.call_tool()
@@ -300,6 +318,39 @@ Case Reference: {case_info['CaseNumber']}"""
             "",
             prompt
         ]
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "get_related_cases":
+        case_number = arguments.get("case_number")
+        case = sf_client.get_case(case_number)
+        if not case:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
+        
+        related = sf_client.get_related_cases(case['Id'], case['Subject'])
+        if not related:
+            return [{"type": "text", "text": f"No related cases found for {case_number}."}]
+        
+        output = [f"Cases related to {case_number}:", ""]
+        for r in related:
+            output.append(f"- [{r['CaseNumber']}] {r['Subject']} ({r['Status']})")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "get_case_articles":
+        case_number = arguments.get("case_number")
+        case = sf_client.get_case(case_number)
+        if not case:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
+        
+        articles = sf_client.get_case_articles(case['Id'])
+        if not articles:
+            return [{"type": "text", "text": f"No knowledge articles linked to case {case_number}."}]
+        
+        output = [f"Knowledge Articles for {case_number}:", ""]
+        for a in articles:
+            ka = a.get('KnowledgeArticle', {})
+            output.append(f"- {ka.get('Title', 'Untitled')} ({ka.get('UrlName', '')})")
         
         return [{"type": "text", "text": "\n".join(output)}]
 

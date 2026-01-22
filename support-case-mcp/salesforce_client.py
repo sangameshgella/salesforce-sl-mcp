@@ -188,3 +188,54 @@ class SalesforceClient:
             'recent_comments': comments[:5],  # Last 5 comments
             'feed_items': feed[:10]  # Last 10 feed items
         }
+
+    def get_related_cases(self, case_id: str, subject: str) -> List[Dict[str, Any]]:
+        """Find cases with similar subject or linked to the same contact/account"""
+        self.connect()
+        try:
+            # Extract first few keywords from subject for fuzzy match
+            words = [w for w in subject.split() if len(w) > 3][:3]
+            if not words:
+                return []
+            
+            # Build LIKE conditions for each keyword
+            like_conditions = " OR ".join([f"Subject LIKE '%{self._escape_soql(w)}%'" for w in words])
+            
+            query = f"""
+                SELECT Id, CaseNumber, Subject, Status, CreatedDate
+                FROM Case
+                WHERE Id != '{case_id}'
+                AND ({like_conditions})
+                ORDER BY CreatedDate DESC
+                LIMIT 10
+            """
+            result = self.sf.query(query)
+            return result.get('records', [])
+        except Exception as e:
+            print(f"Error fetching related cases: {e}")
+            return []
+
+    def _escape_soql(self, text: str) -> str:
+        """Escape single quotes for SOQL queries"""
+        if not text:
+            return text
+        return text.replace("'", "\\'").replace("\\", "\\\\")
+
+    def get_case_articles(self, case_id: str) -> List[Dict[str, Any]]:
+        """Get knowledge articles linked to a case"""
+        self.connect()
+        try:
+            # Query CaseArticle junction object
+            query = f"""
+                SELECT KnowledgeArticleId, 
+                       KnowledgeArticle.Title,
+                       KnowledgeArticle.UrlName
+                FROM CaseArticle
+                WHERE CaseId = '{case_id}'
+                LIMIT 10
+            """
+            result = self.sf.query(query)
+            return result.get('records', [])
+        except Exception as e:
+            print(f"Error fetching articles for case {case_id}: {e}")
+            return []
