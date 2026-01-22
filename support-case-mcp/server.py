@@ -19,7 +19,8 @@ server = Server("support-case-mcp")
 @server.list_tools()
 async def list_tools():
     logger.info("list_tools invoked")
-    return [
+    return {
+        "tools": [
         {
             "name": "get_case_details",
             "description": "Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
@@ -85,8 +86,9 @@ async def list_tools():
                 },
                 "required": ["case_number"]
             }
-        }
+        },
     ]
+    }
 
 @server.call_tool()
 async def call_tool(name, arguments):
