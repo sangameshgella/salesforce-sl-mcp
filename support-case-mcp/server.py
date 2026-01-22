@@ -1,4 +1,5 @@
 import sys
+import logging
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
@@ -9,6 +10,7 @@ from salesforce_client import SalesforceClient
 
 # Initialize Salesforce Client
 sf_client = SalesforceClient()
+logger = logging.getLogger("mcp.sse")
 
 # Initialize Standard MCP Server
 server = Server("support-case-mcp")
@@ -260,12 +262,14 @@ sse = SseServerTransport("/messages")
 
 class SseEndpoint:
     async def __call__(self, scope, receive, send):
+        logger.info("SSE connect: path=%s query=%s", scope.get("path"), scope.get("query_string"))
         async with sse.connect_sse(scope, receive, send) as streams:
             await server.run(streams[0], streams[1], server.create_initialization_options())
 
 
 class PostMessageEndpoint:
     async def __call__(self, scope, receive, send):
+        logger.info("POST message: path=%s query=%s", scope.get("path"), scope.get("query_string"))
         await sse.handle_post_message(scope, receive, send)
 
 # Create Starlette App (This is what Uvicorn runs)
@@ -274,8 +278,11 @@ async def handle_home(request: Request):
 
 routes = [
     Route("/sse", endpoint=SseEndpoint(), methods=["GET"]),
+    Route("/sse/", endpoint=SseEndpoint(), methods=["GET"]),
     Route("/messages", endpoint=PostMessageEndpoint(), methods=["POST"]),
+    Route("/messages/", endpoint=PostMessageEndpoint(), methods=["POST"]),
     Route("/sse/messages", endpoint=PostMessageEndpoint(), methods=["POST"]),
+    Route("/sse/messages/", endpoint=PostMessageEndpoint(), methods=["POST"]),
     Route("/", endpoint=handle_home),
 ]
 
