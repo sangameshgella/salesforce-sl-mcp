@@ -97,7 +97,7 @@ async def list_tools():
         },
     ]
     logger.info("list_tools returns list=%s first_keys=%s", isinstance(tools, list), list(tools[0].keys()))
-    return {"tools": tools}
+    return {"tools": tools} # Return a dictionary with a "tools" key and the list of tools as the value
 
 @server.call_tool()
 async def call_tool(name, arguments):
