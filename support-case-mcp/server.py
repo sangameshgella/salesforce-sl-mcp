@@ -1,11 +1,14 @@
 import sys
 import logging
+from contextlib import asynccontextmanager
+
 from mcp.server import Server
-from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
-from starlette.routing import Route, Mount
+from starlette.routing import Mount, Route
 from starlette.requests import Request
 from starlette.responses import Response
+
 from salesforce_client import SalesforceClient
 
 # Initialize Salesforce Client
@@ -316,41 +319,32 @@ Case Reference: {case_info['CaseNumber']}"""
 
     raise ValueError(f"Tool {name} not found")
 
-# Create SSE Transport handler
-sse = SseServerTransport("/messages")
-
-class SseEndpoint:
-    async def __call__(self, scope, receive, send):
-        logger.info("SSE connect: path=%s query=%s", scope.get("path"), scope.get("query_string"))
-        async with sse.connect_sse(scope, receive, send) as streams:
-            try:
-                await server.run(streams[0], streams[1], server.create_initialization_options())
-            except Exception:
-                logger.exception("server.run failed")
-                raise
+# Streamable HTTP transport/session manager
+session_manager = StreamableHTTPSessionManager(server)
 
 
-class PostMessageEndpoint:
-    async def __call__(self, scope, receive, send):
-        logger.info("POST message: path=%s query=%s", scope.get("path"), scope.get("query_string"))
-        await sse.handle_post_message(scope, receive, send)
+async def mcp_app(scope, receive, send):
+    await session_manager.handle_request(scope, receive, send)
+
+
+@asynccontextmanager
+async def lifespan(app: Starlette):
+    async with session_manager.run():
+        yield
+
 
 # Create Starlette App (This is what Uvicorn runs)
 async def handle_home(request: Request):
-    return Response("MCP Server Running. Use /sse endpoint for connection.")
+    return Response("MCP Server Running. Use /mcp endpoint for connection.")
+
 
 routes = [
-    Route("/sse", endpoint=SseEndpoint(), methods=["GET"]),
-    Route("/sse/", endpoint=SseEndpoint(), methods=["GET"]),
-    Route("/messages", endpoint=PostMessageEndpoint(), methods=["POST"]),
-    Route("/messages/", endpoint=PostMessageEndpoint(), methods=["POST"]),
-    Route("/sse/messages", endpoint=PostMessageEndpoint(), methods=["POST"]),
-    Route("/sse/messages/", endpoint=PostMessageEndpoint(), methods=["POST"]),
+    Mount("/mcp", app=mcp_app),
     Route("/", endpoint=handle_home),
 ]
 
-mcp = Starlette(routes=routes)
+mcp = Starlette(routes=routes, lifespan=lifespan)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(mcp, port=8000)
+    uvicorn.run(mcp, host="0.0.0.0", port=8000)
