@@ -24,14 +24,14 @@ async def list_tools():
     logger.info("list_tools invoked")
     def _schema(properties, required):
         return {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "properties": properties,
             "required": required,
             "additionalProperties": False,
         }
 
-    return [
+    return {
+        "tools": [
         {
             "name": "search",
             "description": "Search for support cases by keyword or phrase. Returns matching cases.",
@@ -97,6 +97,7 @@ async def list_tools():
             ),
         },
     ]
+    }
 
 @server.call_tool()
 async def call_tool(name, arguments):
