@@ -21,84 +21,29 @@ server = Server("support-case-mcp")
 
 @server.list_tools()
 async def list_tools():
-    logger.info("list_tools invoked")
-    def _schema(properties, required):
-        return {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-            "additionalProperties": False,
-        }
-
-    tools = [
-        {
-            "name": "search",
-            "description": "Search for support cases by keyword or phrase. Returns matching cases.",
-            "inputSchema": _schema(
-                {"query": {"type": "string", "description": "Search query string"}},
-                ["query"],
-            ),
-        },
-        {
-            "name": "fetch",
-            "description": "Fetch full details for a support case by case number.",
-            "inputSchema": _schema(
-                {"id": {"type": "string", "description": "Case Number (not Id)"}},
-                ["id"],
-            ),
-        },
-        {
-            "name": "get_case_details",
-            "description": "Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
-            "inputSchema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number (not Id)"}},
-                ["case_number"],
-            ),
-        },
-        {
-            "name": "search_cases",
-            "description": "Search for support cases using a keyword or phrase. Returns matching cases with snippets.",
-            "inputSchema": _schema(
-                {"query_string": {"type": "string", "description": "Keywords to search for"}},
-                ["query_string"],
-            ),
-        },
-        {
-            "name": "get_case_history",
-            "description": "Get the history of field changes for a case. Shows what modifications were made, when, and by whom.",
-            "inputSchema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number"}},
-                ["case_number"],
-            ),
-        },
-        {
-            "name": "get_case_timeline",
-            "description": "Get the activity feed/timeline for a case. Shows posts, updates, and activities.",
-            "inputSchema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number"}},
-                ["case_number"],
-            ),
-        },
-        {
-            "name": "get_case_summary",
-            "description": "Get comprehensive case data for follow-up inquiries. Returns case info, fix status, validation status, history, and recent comments. Use this for customer follow-up questions about case status.",
-            "inputSchema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number"}},
-                ["case_number"],
-            ),
-        },
-        {
-            "name": "suggest_knowledge_article",
-            "description": "Check if a resolved case is suitable for conversion to a Knowledge Article (KBA). Returns eligibility and suggested prompt.",
-            "inputSchema": _schema(
-                {"case_number": {"type": "string", "description": "The Case Number"}},
-                ["case_number"],
-            ),
-        },
-    ]
-    result = {"tools": tools}
-    logger.info("SENDING result type=%s keys=%s", type(result), list(result.keys()))
-    return result
+    logger.info("list_tools invoked - MINIMAL")
+    return {
+        "tools": [
+            {
+                "name": "search",
+                "description": "test",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "fetch",
+                "description": "test",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}},
+                    "required": ["id"],
+                },
+            },
+        ],
+    }
 
 @server.call_tool()
 async def call_tool(name, arguments):
