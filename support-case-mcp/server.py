@@ -33,6 +33,30 @@ async def list_tools():
 
     return [
         {
+            "name": "search",
+            "description": "Search for support cases by keyword or phrase. Returns matching cases.",
+            "inputSchema": _schema(
+                {"query": {"type": "string", "description": "Search query string"}},
+                ["query"],
+            ),
+            "input_schema": _schema(
+                {"query": {"type": "string", "description": "Search query string"}},
+                ["query"],
+            ),
+        },
+        {
+            "name": "fetch",
+            "description": "Fetch full details for a support case by case number.",
+            "inputSchema": _schema(
+                {"id": {"type": "string", "description": "Case Number (not Id)"}},
+                ["id"],
+            ),
+            "input_schema": _schema(
+                {"id": {"type": "string", "description": "Case Number (not Id)"}},
+                ["id"],
+            ),
+        },
+        {
             "name": "get_case_details",
             "description": "Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
             "inputSchema": _schema(
@@ -109,7 +133,39 @@ async def list_tools():
 @server.call_tool()
 async def call_tool(name, arguments):
     logger.info("call_tool invoked: %s", name)
-    if name == "get_case_details":
+    if name == "search":
+        query = arguments.get("query")
+        results = sf_client.search_cases(query)
+        if not results:
+            return [{"type": "text", "text": "No cases found matching that query."}]
+
+        output = []
+        for r in results:
+            output.append(f"{r['CaseNumber']}: {r['Subject']} ({r['Status']})")
+
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "fetch":
+        case_number = arguments.get("id")
+        case = sf_client.get_case(case_number)
+        if not case:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
+
+        comments = sf_client.get_case_comments(case['Id'])
+        output = [
+            f"Case: {case['CaseNumber']}",
+            f"Subject: {case['Subject']}",
+            f"Status: {case['Status']}",
+            f"Priority: {case['Priority']}",
+            f"Description: {case['Description']}",
+            "\n--- Recent Comments ---"
+        ]
+        for c in comments:
+            output.append(f"[{c['CreatedDate']}] {c['CreatedBy']['Name']}: {c['CommentBody']}")
+
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "get_case_details":
         case_number = arguments.get("case_number")
         case = sf_client.get_case(case_number)
         if not case:
@@ -283,6 +339,15 @@ session_manager = StreamableHTTPSessionManager(server, stateless=True, json_resp
 
 
 async def mcp_app(scope, receive, send):
+    headers = list(scope.get("headers") or [])
+    header_names = {k.lower() for k, _ in headers}
+    if b"accept" not in header_names:
+        headers.append((b"accept", b"application/json"))
+    if scope.get("method") == "POST" and b"content-type" not in header_names:
+        headers.append((b"content-type", b"application/json"))
+    if headers != list(scope.get("headers") or []):
+        scope = dict(scope)
+        scope["headers"] = headers
     await session_manager.handle_request(scope, receive, send)
 
 
