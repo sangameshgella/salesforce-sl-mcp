@@ -65,7 +65,23 @@ class SalesforceClient:
         return escaped
 
     def search_cases(self, query_text: str) -> List[Dict[str, Any]]:
+        """
+        Search for cases using a combined strategy:
+        1. Try fast SOSL full-text search first
+        2. If no results, fall back to fuzzy SOQL LIKE search
+        """
         self.connect()
+        
+        # Try SOSL first (fast, indexed full-text search)
+        results = self._search_cases_sosl(query_text)
+        if results:
+            return results
+        
+        # Fall back to fuzzy SOQL search (slower but more flexible)
+        return self._search_cases_fuzzy(query_text)
+
+    def _search_cases_sosl(self, query_text: str) -> List[Dict[str, Any]]:
+        """Fast SOSL full-text search (exact word matching)"""
         try:
             # Sanitize user input
             escaped_query = self._escape_sosl(query_text)
@@ -79,7 +95,45 @@ class SalesforceClient:
             result = self.sf.search(sosl)
             return result.get('searchRecords', [])
         except Exception as e:
-            print(f"Error searching cases: {e}")
+            print(f"Error in SOSL search: {e}")
+            return []
+
+    def _search_cases_fuzzy(self, query_text: str) -> List[Dict[str, Any]]:
+        """
+        Fuzzy search using SOQL LIKE for partial matching.
+        Searches for each term in Subject and Description fields.
+        """
+        try:
+            # Split query into individual terms, filter out very short words
+            terms = [t.strip() for t in query_text.split() if len(t.strip()) >= 2]
+            
+            if not terms:
+                return []
+            
+            # Build LIKE conditions for Subject and Description
+            like_conditions = []
+            for term in terms:
+                escaped = self._escape_soql(term)
+                like_conditions.append(f"Subject LIKE '%{escaped}%'")
+                like_conditions.append(f"Description LIKE '%{escaped}%'")
+            
+            where_clause = " OR ".join(like_conditions)
+            
+            query = f"""
+                SELECT Id, CaseNumber, Subject, Status, Description 
+                FROM Case 
+                WHERE {where_clause}
+                ORDER BY LastModifiedDate DESC 
+                LIMIT 50
+            """
+            
+            with open("debug.log", "a") as f:
+                f.write(f"DEBUG SOQL Fuzzy: {query}\n")
+            
+            result = self.sf.query(query)
+            return result.get('records', [])
+        except Exception as e:
+            print(f"Error in fuzzy SOQL search: {e}")
             return []
 
     def get_case_comments(self, case_id: str) -> List[Dict[str, Any]]:
