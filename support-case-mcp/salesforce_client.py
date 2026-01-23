@@ -844,14 +844,24 @@ class SalesforceClient:
                 }
             
             # Link to case if provided
+            # Note: article_id is the version ID (ka0...), but CaseArticle needs the master KnowledgeArticleId (kav...)
+            master_article_id = None
             if case_number and article_id:
                 try:
+                    # Query to get the master KnowledgeArticleId from the version record
+                    kav_query = f"SELECT KnowledgeArticleId FROM Knowledge__kav WHERE Id = '{article_id}'"
+                    kav_result = self.sf.query(kav_query)
+                    if kav_result['totalSize'] > 0:
+                        master_article_id = kav_result['records'][0]['KnowledgeArticleId']
+                        logger.info(f"DEBUG [LINK] version_id={article_id}, master_article_id={master_article_id}")
+                    
                     case = self.get_case(case_number)
-                    if case:
+                    if case and master_article_id:
                         self.sf.CaseArticle.create({
                             'CaseId': case['Id'],
-                            'KnowledgeArticleId': article_id
+                            'KnowledgeArticleId': master_article_id
                         })
+                        logger.info(f"DEBUG [LINK SUCCESS] Linked article {master_article_id} to case {case_number}")
                 except Exception as link_error:
                     logger.warning(f"Could not link article to case: {link_error}")
             
