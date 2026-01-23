@@ -117,69 +117,63 @@ async def list_tools():
                 "required": ["case_number"],
             },
         ),
-        # ========== AI Summary Tools ==========
+        # === AGENTIC TOOLS ===
         Tool(
-            name="get_case_emails",
-            description="Get all email messages linked to a case. Returns email details including sender, recipient, subject, body, and date.",
-            inputSchema={
-                "type": "object",
-                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
-                "required": ["case_number"],
-            },
-        ),
-        Tool(
-            name="get_case_for_ai_summary",
-            description="Get case data optimized for AI summary generation. Returns case description plus all email messages and comments in a structured format ready for LLM summarization.",
-            inputSchema={
-                "type": "object",
-                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
-                "required": ["case_number"],
-            },
-        ),
-        Tool(
-            name="update_case_ai_summary",
-            description="Save an AI-generated summary to the Case Summary (AI) field in Salesforce. Use this after generating a summary from case data.",
+            name="analyze_case",
+            description="Comprehensive case analysis: details, history, comments, related cases, articles, and AI-generated insights with suggested next actions. Use this for a complete understanding of any case.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"},
-                    "summary": {"type": "string", "description": "The AI-generated summary text to save"}
+                    "depth": {"type": "string", "description": "Analysis depth: 'quick' for basic info, 'full' for complete data", "enum": ["quick", "full"], "default": "full"}
                 },
-                "required": ["case_number", "summary"],
-            },
-        ),
-        # ========== Knowledge Article Tools ==========
-        Tool(
-            name="search_knowledge_articles",
-            description="Search Knowledge Base Articles by keyword or phrase. Returns matching articles with title, article number, summary, and URL.",
-            inputSchema={
-                "type": "object",
-                "properties": {"query": {"type": "string", "description": "Search keywords or phrase"}},
-                "required": ["query"],
+                "required": ["case_number"],
             },
         ),
         Tool(
-            name="get_knowledge_article",
-            description="Get full details of a Knowledge Article by its Article Number (e.g., 000005271). Returns title, summary, and full content for AI summarization.",
-            inputSchema={
-                "type": "object",
-                "properties": {"article_number": {"type": "string", "description": "The Article Number (e.g., 000005271)"}},
-                "required": ["article_number"],
-            },
-        ),
-        Tool(
-            name="update_kba_summary",
-            description="Save an AI-generated summary to a Knowledge Article's Summary field. Use this after generating a summary from article content.",
+            name="follow_up_case",
+            description="Handle customer follow-up on existing case. Analyzes context, determines what's been done, and generates appropriate response with suggested next steps. Perfect for 'what's the status?' or 'what has been done?' questions.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "article_number": {"type": "string", "description": "The Article Number"},
-                    "summary": {"type": "string", "description": "The AI-generated summary text to save"}
+                    "case_number": {"type": "string", "description": "The Case Number"},
+                    "customer_question": {"type": "string", "description": "What the customer is asking about"}
                 },
-                "required": ["article_number", "summary"],
+                "required": ["case_number", "customer_question"],
+            },
+        ),
+        Tool(
+            name="triage_new_case",
+            description="Triage a new or unassigned case. Classifies priority, finds similar past cases, suggests knowledge articles, and recommends actions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_number": {"type": "string", "description": "The Case Number to triage"},
+                    "additional_context": {"type": "string", "description": "Any additional context about the case"}
+                },
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="handle_request",
+            description="Intelligent request handler. Describe what you need in natural language and this will route to the appropriate tools and return a consolidated response. Examples: 'status of case X', 'customer asking about X', 'find cases about Y', 'ready to close X?'",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "request": {"type": "string", "description": "Natural language request"},
+                    "context": {"type": "object", "description": "Optional context like case_number if known", "properties": {"case_number": {"type": "string"}}}
+                },
+                "required": ["request"],
             },
         ),
     ]
+
+def _add_suggestions(text: str, suggestions: list) -> list:
+    """Helper to format response with suggested next actions"""
+    suggestion_text = "\n\n💡 SUGGESTED NEXT ACTIONS:\n" + "\n".join([
+        f"  • {s['tool']}: {s['reason']}" for s in suggestions
+    ])
+    return [{"type": "text", "text": text + suggestion_text}]
 
 @server.call_tool()
 async def call_tool(name, arguments):
@@ -188,11 +182,16 @@ async def call_tool(name, arguments):
         query = arguments.get("query")
         results = sf_client.search_cases(query)
         if not results:
-            return [{"type": "text", "text": "No cases found matching that query."}]
+            return [{"type": "text", "text": "No cases found matching that query.\n\n💡 SUGGESTED: Try different keywords or use 'search_cases' for broader results."}]
 
         output = []
         for r in results:
             output.append(f"{r['CaseNumber']}: {r['Subject']} ({r['Status']})")
+        
+        output.append("")
+        output.append("💡 SUGGESTED NEXT ACTIONS:")
+        output.append("  • fetch: Get full details for any case above")
+        output.append("  • analyze_case: Get comprehensive analysis with insights")
 
         return [{"type": "text", "text": "\n".join(output)}]
 
@@ -213,6 +212,12 @@ async def call_tool(name, arguments):
         ]
         for c in comments:
             output.append(f"[{c['CreatedDate']}] {c['CreatedBy']['Name']}: {c['CommentBody']}")
+        
+        output.append("")
+        output.append("💡 SUGGESTED NEXT ACTIONS:")
+        output.append(f"  • get_case_history: See what changes have been made")
+        output.append(f"  • get_related_cases: Find similar cases")
+        output.append(f"  • analyze_case: Get comprehensive analysis with AI insights")
 
         return [{"type": "text", "text": "\n".join(output)}]
 
@@ -233,6 +238,12 @@ async def call_tool(name, arguments):
         ]
         for c in comments:
             output.append(f"[{c['CreatedDate']}] {c['CreatedBy']['Name']}: {c['CommentBody']}")
+        
+        output.append("")
+        output.append("💡 SUGGESTED NEXT ACTIONS:")
+        output.append(f"  • get_case_history: See field change history")
+        output.append(f"  • get_case_timeline: See activity feed")
+        output.append(f"  • get_case_summary: Get closure readiness assessment")
             
         return [{"type": "text", "text": "\n".join(output)}]
 
@@ -240,7 +251,7 @@ async def call_tool(name, arguments):
         query = arguments.get("query_string")
         results = sf_client.search_cases(query)
         if not results:
-            return [{"type": "text", "text": "No cases found matching that query."}]
+            return [{"type": "text", "text": "No cases found matching that query.\n\n💡 SUGGESTED: Try broader keywords or check spelling."}]
         
         output = [f"Found {len(results)} cases:"]
         for r in results:
@@ -250,6 +261,12 @@ async def call_tool(name, arguments):
             output.append(f"- [{r['CaseNumber']}] {r['Subject']} ({r['Status']})")
             if desc_snippet:
                  output.append(f"  Snippet: {desc_snippet}")
+        
+        output.append("")
+        output.append("💡 SUGGESTED NEXT ACTIONS:")
+        output.append("  • get_case_details: Get full details for a specific case")
+        output.append("  • analyze_case: Get comprehensive analysis for any case")
+        output.append("  • get_related_cases: Find cases related to a specific case")
         
         return [{"type": "text", "text": "\n".join(output)}]
 
@@ -261,7 +278,7 @@ async def call_tool(name, arguments):
         
         history = sf_client.get_case_history(case['Id'])
         if not history:
-            return [{"type": "text", "text": f"No history found for case {case_number}."}]
+            return [{"type": "text", "text": f"No history found for case {case_number}.\n\n💡 SUGGESTED: Check get_case_timeline for activity feed."}]
         
         output = [f"Case {case_number} - Field Change History:", ""]
         for h in history:
@@ -271,6 +288,12 @@ async def call_tool(name, arguments):
             date = h.get('CreatedDate', '')
             user = h.get('CreatedBy', {}).get('Name', 'Unknown') if h.get('CreatedBy') else 'Unknown'
             output.append(f"[{date}] {user}: {field} changed from '{old_val}' to '{new_val}'")
+        
+        output.append("")
+        output.append("💡 SUGGESTED NEXT ACTIONS:")
+        output.append(f"  • get_case_timeline: See posts and activities")
+        output.append(f"  • get_case_summary: Get closure readiness assessment")
+        output.append(f"  • follow_up_case: Generate customer follow-up response")
         
         return [{"type": "text", "text": "\n".join(output)}]
 
@@ -282,7 +305,7 @@ async def call_tool(name, arguments):
         
         feed = sf_client.get_case_feed(case['Id'])
         if not feed:
-            return [{"type": "text", "text": f"No timeline/feed found for case {case_number}."}]
+            return [{"type": "text", "text": f"No timeline/feed found for case {case_number}.\n\n💡 SUGGESTED: Check get_case_history for field changes."}]
         
         output = [f"Case {case_number} - Activity Timeline:", ""]
         for f in feed:
@@ -291,6 +314,12 @@ async def call_tool(name, arguments):
             date = f.get('CreatedDate', '')
             user = f.get('CreatedBy', {}).get('Name', 'Unknown') if f.get('CreatedBy') else 'Unknown'
             output.append(f"[{date}] [{feed_type}] {user}: {body}")
+        
+        output.append("")
+        output.append("💡 SUGGESTED NEXT ACTIONS:")
+        output.append(f"  • get_case_summary: Get closure readiness assessment")
+        output.append(f"  • follow_up_case: Generate customer follow-up response")
+        output.append(f"  • analyze_case: Get comprehensive case analysis")
         
         return [{"type": "text", "text": "\n".join(output)}]
 
@@ -416,159 +445,431 @@ Case Reference: {case_info['CaseNumber']}"""
         
         return [{"type": "text", "text": "\n".join(output)}]
 
-    # ========== AI Summary Tool Handlers ==========
-
-    elif name == "get_case_emails":
+    # === AGENTIC TOOL HANDLERS ===
+    
+    elif name == "analyze_case":
         case_number = arguments.get("case_number")
-        case = sf_client.get_case(case_number)
-        if not case:
-            return [{"type": "text", "text": f"Case {case_number} not found."}]
+        depth = arguments.get("depth", "full")
         
-        emails = sf_client.get_case_emails(case['Id'])
-        if not emails:
-            return [{"type": "text", "text": f"No email messages found for case {case_number}."}]
-        
-        output = [f"Email Messages for Case {case_number}:", f"Total: {len(emails)} emails", ""]
-        for email in emails:
-            direction = "INBOUND" if email.get('Incoming') else "OUTBOUND"
-            output.append(f"[{email.get('MessageDate')}] [{direction}]")
-            output.append(f"  From: {email.get('FromAddress')}")
-            output.append(f"  To: {email.get('ToAddress')}")
-            output.append(f"  Subject: {email.get('Subject')}")
-            body = email.get('TextBody') or email.get('HtmlBody', '')
-            if body:
-                # Truncate long bodies for display
-                body_preview = body[:500].replace('\n', ' ')
-                if len(body) > 500:
-                    body_preview += "..."
-                output.append(f"  Body: {body_preview}")
-            output.append("")
-        
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "get_case_for_ai_summary":
-        case_number = arguments.get("case_number")
-        data = sf_client.get_case_for_ai_summary(case_number)
+        data = sf_client.get_comprehensive_case_data(case_number, depth)
         if not data:
             return [{"type": "text", "text": f"Case {case_number} not found."}]
         
-        # Format the data for AI consumption
+        case_info = data['case_info']
+        tech = data['technical_summary']
+        metrics = data.get('metrics', {})
+        risk_factors = data.get('risk_factors', [])
+        
+        # Build comprehensive output
         output = [
-            "=== CASE DATA FOR AI SUMMARY GENERATION ===",
+            f"{'='*50}",
+            f"CASE ANALYSIS: {case_info['CaseNumber']}",
+            f"{'='*50}",
             "",
-            f"Case Number: {data['case_number']}",
-            f"Subject: {data['subject']}",
-            f"Status: {data['status']}",
-            f"Priority: {data['priority']}",
-            f"Contact: {data['contact_name'] or 'N/A'}",
+            "📋 CASE SUMMARY",
+            f"  Subject: {case_info['Subject']}",
+            f"  Status: {case_info['Status']}",
+            f"  Priority: {case_info['Priority']}",
+            f"  Created: {case_info['CreatedDate']}",
+            f"  Last Updated: {case_info['LastModifiedDate']}",
+            f"  Contact: {case_info['ContactName'] or 'N/A'}",
             "",
-            "--- CASE DESCRIPTION ---",
-            data['description'] or '(No description provided)',
+            "🔧 TECHNICAL STATUS",
+            f"  Fix Status: {tech['fix_status'] or 'Not set'}",
+            f"  Validation Status: {tech['validation_status'] or 'Not set'}",
+            f"  Closure Readiness: {tech['closure_readiness']}",
             "",
-            f"--- EMAIL MESSAGES ({data['email_count']} total) ---"
         ]
         
-        for i, email in enumerate(data['emails'], 1):
-            output.append(f"\n[Email {i}] [{email['direction'].upper()}] {email['date']}")
-            output.append(f"From: {email['from']}")
-            output.append(f"To: {email['to']}")
-            output.append(f"Subject: {email['subject']}")
-            output.append(f"Body:\n{email['body']}")
+        # Add metrics
+        if metrics:
+            output.extend([
+                "📊 METRICS",
+                f"  Days Since Update: {metrics.get('days_since_update', 'N/A')}",
+                f"  Total Comments: {metrics.get('total_comments', 0)}",
+                f"  Related Cases: {metrics.get('related_cases_count', 0)}",
+                f"  Knowledge Articles: {metrics.get('articles_count', 0)}",
+                "",
+            ])
         
-        if data['comments']:
-            output.append(f"\n--- CASE COMMENTS ({data['comment_count']} total) ---")
-            for i, comment in enumerate(data['comments'], 1):
-                output.append(f"\n[Comment {i}] {comment['date']} - {comment['author']}")
-                output.append(comment['body'])
-        
-        output.append("\n" + "=" * 50)
-        output.append("Please generate a comprehensive AI summary based on the above case data.")
-        output.append("Include: key issues, resolution steps taken, current status, and any follow-up actions.")
-        
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "update_case_ai_summary":
-        case_number = arguments.get("case_number")
-        summary = arguments.get("summary")
-        
-        if not summary:
-            return [{"type": "text", "text": "Error: Summary text is required."}]
-        
-        result = sf_client.update_case_ai_summary(case_number, summary)
-        
-        if result['success']:
-            return [{"type": "text", "text": f"Successfully updated AI Summary for case {case_number}.\nCase ID: {result['case_id']}"}]
-        else:
-            return [{"type": "text", "text": f"Failed to update AI Summary: {result['error']}"}]
-
-    # ========== Knowledge Article Tool Handlers ==========
-
-    elif name == "search_knowledge_articles":
-        query = arguments.get("query")
-        if not query:
-            return [{"type": "text", "text": "Error: Search query is required."}]
-        
-        articles = sf_client.search_knowledge_articles(query)
-        if not articles:
-            return [{"type": "text", "text": f"No knowledge articles found matching '{query}'."}]
-        
-        output = [f"Found {len(articles)} Knowledge Articles:", ""]
-        for article in articles:
-            output.append(f"[{article['article_number']}] {article['title']}")
-            if article.get('summary'):
-                summary_preview = article['summary'][:200].replace('\n', ' ')
-                if len(article['summary']) > 200:
-                    summary_preview += "..."
-                output.append(f"  Summary: {summary_preview}")
-            output.append(f"  URL: {article.get('url_name', 'N/A')}")
-            output.append(f"  Last Modified: {article.get('last_modified', 'N/A')}")
+        # Add risk factors
+        if risk_factors:
+            output.extend([
+                "⚠️ RISK FACTORS",
+            ])
+            for rf in risk_factors:
+                output.append(f"  • {rf}")
             output.append("")
         
+        # Add description
+        output.extend([
+            "📝 DESCRIPTION",
+            case_info['Description'] or '(No description)',
+            "",
+        ])
+        
+        # Full mode: add history and comments
+        if depth == "full":
+            if data.get('history'):
+                output.extend(["📜 RECENT CHANGES"])
+                for h in data['history'][:5]:
+                    field = h.get('Field', 'Unknown')
+                    new_val = h.get('NewValue', '')
+                    date = h.get('CreatedDate', '')[:10] if h.get('CreatedDate') else ''
+                    output.append(f"  [{date}] {field} → {new_val}")
+                output.append("")
+            
+            if data.get('recent_comments'):
+                output.extend(["💬 RECENT COMMENTS"])
+                for c in data['recent_comments'][:3]:
+                    user = c.get('CreatedBy', {}).get('Name', 'Unknown') if c.get('CreatedBy') else 'Unknown'
+                    body = (c.get('CommentBody', '')[:100] + '...') if len(c.get('CommentBody', '')) > 100 else c.get('CommentBody', '')
+                    output.append(f"  • {user}: {body}")
+                output.append("")
+            
+            if data.get('related_cases'):
+                output.extend(["🔗 RELATED CASES"])
+                for r in data['related_cases'][:3]:
+                    output.append(f"  • [{r['CaseNumber']}] {r['Subject']} ({r['Status']})")
+                output.append("")
+        
+        # Generate suggested actions based on case state
+        suggested_actions = []
+        if tech['closure_readiness'] == 'ready':
+            suggested_actions.append({"action": "close_case", "reason": "Fix implemented and validated", "priority": "high"})
+            suggested_actions.append({"action": "create_kba", "reason": "Convert to knowledge article", "priority": "medium"})
+        elif tech['closure_readiness'] == 'pending_validation':
+            suggested_actions.append({"action": "run_validation", "reason": "Complete validation testing", "priority": "high"})
+            suggested_actions.append({"action": "contact_customer", "reason": "Confirm fix works", "priority": "medium"})
+        else:
+            suggested_actions.append({"action": "investigate", "reason": "Case needs attention", "priority": "high"})
+        
+        if metrics.get('days_since_update', 0) and metrics['days_since_update'] > 7:
+            suggested_actions.append({"action": "follow_up", "reason": f"No activity for {metrics['days_since_update']} days", "priority": "high"})
+        
+        if metrics.get('related_cases_count', 0) > 2:
+            suggested_actions.append({"action": "check_patterns", "reason": "Multiple similar cases exist", "priority": "medium"})
+        
+        output.extend([
+            "💡 SUGGESTED ACTIONS",
+        ])
+        for sa in suggested_actions:
+            output.append(f"  [{sa['priority'].upper()}] {sa['action']}: {sa['reason']}")
+        
         return [{"type": "text", "text": "\n".join(output)}]
 
-    elif name == "get_knowledge_article":
-        article_number = arguments.get("article_number")
-        article = sf_client.get_knowledge_article(article_number)
-        if not article:
-            return [{"type": "text", "text": f"Knowledge Article {article_number} not found."}]
+    elif name == "follow_up_case":
+        case_number = arguments.get("case_number")
+        customer_question = arguments.get("customer_question", "")
+        
+        data = sf_client.get_comprehensive_case_data(case_number, "full")
+        if not data:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
+        
+        case_info = data['case_info']
+        tech = data['technical_summary']
+        history = data.get('history', [])
+        comments = data.get('recent_comments', [])
         
         output = [
-            "=== KNOWLEDGE ARTICLE DATA FOR AI SUMMARY GENERATION ===",
+            f"{'='*50}",
+            f"FOLLOW-UP RESPONSE: {case_info['CaseNumber']}",
+            f"{'='*50}",
             "",
-            f"Article Number: {article['article_number']}",
-            f"Title: {article['title']}",
-            f"Article Type: {article.get('article_type', 'N/A')}",
-            f"Version: {article.get('version', 'N/A')}",
-            f"Status: {article.get('publish_status', 'N/A')}",
-            f"Created: {article.get('created_date', 'N/A')}",
-            f"Last Modified: {article.get('last_modified', 'N/A')}",
+            f"Customer Question: {customer_question}",
             "",
-            "--- CURRENT SUMMARY ---",
-            article.get('summary') or '(No summary)',
+            "📋 CURRENT STATUS",
+            f"  Case Status: {case_info['Status']}",
+            f"  Fix Status: {tech['fix_status'] or 'In Progress'}",
+            f"  Validation: {tech['validation_status'] or 'Pending'}",
             "",
-            "--- ARTICLE DETAILS/CONTENT ---",
-            article.get('details') or '(No detailed content available - may need to query specific article type fields)',
-            "",
-            "=" * 50,
-            "Please generate or update the AI summary based on the above article content."
         ]
+        
+        # What has been done
+        output.append("✅ WHAT HAS BEEN DONE")
+        if tech['fix_status'] == 'Implemented':
+            output.append("  • A fix has been implemented by the engineering team")
+        if tech['validation_status'] == 'Completed':
+            output.append("  • Validation/testing has been completed successfully")
+        elif tech['validation_status']:
+            output.append(f"  • Validation is currently: {tech['validation_status']}")
+        
+        if history:
+            output.append("  • Recent changes:")
+            for h in history[:3]:
+                field = h.get('Field', 'Unknown')
+                new_val = h.get('NewValue', '')
+                date = h.get('CreatedDate', '')[:10] if h.get('CreatedDate') else ''
+                output.append(f"    - [{date}] {field} updated to '{new_val}'")
+        output.append("")
+        
+        # Generate response based on closure readiness
+        output.append("📝 SUGGESTED RESPONSE TO CUSTOMER")
+        output.append("-" * 40)
+        
+        if tech['closure_readiness'] == 'ready':
+            output.extend([
+                "The issue has been resolved. Our team has:",
+                "  1. Implemented the necessary fix",
+                "  2. Completed validation testing",
+                "",
+                "The case is ready for closure. Please confirm if the issue",
+                "is resolved on your end, and we can close this case.",
+            ])
+        elif tech['closure_readiness'] == 'pending_validation':
+            output.extend([
+                "We have implemented a fix for this issue. Our team is",
+                "currently completing the validation/testing phase.",
+                "",
+                "Once validation is complete, we will notify you and",
+                "coordinate to confirm the fix resolves your issue.",
+            ])
+        else:
+            output.extend([
+                f"Your case is currently being actively worked on.",
+                f"Current status: {case_info['Status']}",
+                "",
+                "Our team is investigating the issue. We will provide",
+                "updates as we make progress.",
+            ])
+        output.append("-" * 40)
+        output.append("")
+        
+        # Suggested next actions
+        output.append("💡 SUGGESTED NEXT ACTIONS")
+        if tech['closure_readiness'] == 'ready':
+            output.append("  [HIGH] Contact customer to confirm resolution")
+            output.append("  [MEDIUM] Prepare case for closure")
+            output.append("  [LOW] Consider creating Knowledge Article")
+        elif tech['closure_readiness'] == 'pending_validation':
+            output.append("  [HIGH] Complete validation testing")
+            output.append("  [MEDIUM] Update customer on timeline")
+        else:
+            output.append("  [HIGH] Continue investigation")
+            output.append("  [MEDIUM] Provide status update to customer")
         
         return [{"type": "text", "text": "\n".join(output)}]
 
-    elif name == "update_kba_summary":
-        article_number = arguments.get("article_number")
-        summary = arguments.get("summary")
+    elif name == "triage_new_case":
+        case_number = arguments.get("case_number")
+        additional_context = arguments.get("additional_context", "")
         
-        if not summary:
-            return [{"type": "text", "text": "Error: Summary text is required."}]
+        data = sf_client.get_comprehensive_case_data(case_number, "full")
+        if not data:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
         
-        result = sf_client.update_kba_summary(article_number, summary)
+        case_info = data['case_info']
+        related = data.get('related_cases', [])
+        articles = data.get('knowledge_articles', [])
         
-        if result['success']:
-            return [{"type": "text", "text": f"Successfully updated Summary for article {article_number}.\nTitle: {result['title']}\nArticle ID: {result['article_id']}"}]
+        output = [
+            f"{'='*50}",
+            f"CASE TRIAGE: {case_info['CaseNumber']}",
+            f"{'='*50}",
+            "",
+            "📋 CASE DETAILS",
+            f"  Subject: {case_info['Subject']}",
+            f"  Current Priority: {case_info['Priority']}",
+            f"  Status: {case_info['Status']}",
+            f"  Contact: {case_info['ContactName'] or 'N/A'}",
+            "",
+            "📝 DESCRIPTION",
+            case_info['Description'] or '(No description)',
+            "",
+        ]
+        
+        # Priority recommendation based on keywords and context
+        desc_lower = (case_info['Description'] or '').lower()
+        subject_lower = (case_info['Subject'] or '').lower()
+        
+        priority_indicators = {
+            'critical': ['critical', 'urgent', 'down', 'outage', 'production', 'blocker'],
+            'high': ['high', 'important', 'asap', 'deadline', 'customer escalation'],
+            'medium': ['issue', 'problem', 'bug', 'error'],
+            'low': ['question', 'inquiry', 'enhancement', 'feature request']
+        }
+        
+        recommended_priority = case_info['Priority']  # default to current
+        priority_reason = "Based on current assignment"
+        
+        for priority, keywords in priority_indicators.items():
+            if any(kw in desc_lower or kw in subject_lower for kw in keywords):
+                recommended_priority = priority.capitalize()
+                matched = [kw for kw in keywords if kw in desc_lower or kw in subject_lower]
+                priority_reason = f"Keywords detected: {', '.join(matched[:2])}"
+                break
+        
+        output.extend([
+            "🎯 PRIORITY ASSESSMENT",
+            f"  Current: {case_info['Priority']}",
+            f"  Recommended: {recommended_priority}",
+            f"  Reason: {priority_reason}",
+            "",
+        ])
+        
+        # Similar cases
+        if related:
+            output.extend([
+                "🔗 SIMILAR PAST CASES",
+                "  (Review these for potential solutions)",
+            ])
+            for r in related[:5]:
+                output.append(f"  • [{r['CaseNumber']}] {r['Subject']} ({r['Status']})")
+            output.append("")
         else:
-            error_msg = result.get('error', 'Unknown error')
-            return [{"type": "text", "text": f"Failed to update KBA Summary: {error_msg}"}]
+            output.append("🔗 No similar cases found in history")
+            output.append("")
+        
+        # Knowledge articles
+        if articles:
+            output.extend([
+                "📚 RELEVANT KNOWLEDGE ARTICLES",
+            ])
+            for a in articles:
+                ka = a.get('KnowledgeArticle', {})
+                output.append(f"  • {ka.get('Title', 'Untitled')}")
+            output.append("")
+        
+        # Triage recommendations
+        output.extend([
+            "💡 TRIAGE RECOMMENDATIONS",
+            f"  1. Set priority to: {recommended_priority}",
+        ])
+        
+        if related:
+            output.append(f"  2. Review {len(related)} similar cases for patterns/solutions")
+        if articles:
+            output.append(f"  3. Check {len(articles)} knowledge articles before investigation")
+        
+        # Suggest assignment based on case type
+        if 'firmware' in desc_lower or 'sdk' in desc_lower:
+            output.append("  4. Assign to: Firmware/SDK Team")
+        elif 'hardware' in desc_lower or 'board' in desc_lower:
+            output.append("  4. Assign to: Hardware Team")
+        elif 'certification' in desc_lower or 'compliance' in desc_lower:
+            output.append("  4. Assign to: Compliance Team")
+        else:
+            output.append("  4. Assign to: General Support Queue")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "handle_request":
+        request = arguments.get("request", "").lower()
+        context = arguments.get("context", {})
+        case_number = context.get("case_number") if context else None
+        
+        # Extract case number from request if not in context
+        import re
+        if not case_number:
+            # Look for patterns like "case 00335943" or just "00335943"
+            match = re.search(r'(?:case\s+)?(\d{8})', request)
+            if match:
+                case_number = match.group(1)
+        
+        output = [
+            f"{'='*50}",
+            "INTELLIGENT REQUEST HANDLER",
+            f"{'='*50}",
+            "",
+            f"Request: {arguments.get('request', '')}",
+            f"Detected Case: {case_number or 'None'}",
+            "",
+        ]
+        
+        # Intent classification
+        intent = None
+        
+        if any(word in request for word in ['status', 'update', 'progress', "what's happening"]):
+            intent = 'status_check'
+        elif any(word in request for word in ['customer asking', 'follow up', 'follow-up', 'what has been done', "what's been done"]):
+            intent = 'follow_up'
+        elif any(word in request for word in ['find', 'search', 'look for', 'cases about']):
+            intent = 'search'
+        elif any(word in request for word in ['ready to close', 'can we close', 'closure']):
+            intent = 'closure_check'
+        elif any(word in request for word in ['triage', 'new case', 'prioritize']):
+            intent = 'triage'
+        elif any(word in request for word in ['kba', 'knowledge article', 'document']):
+            intent = 'kba_check'
+        elif any(word in request for word in ['analyze', 'analysis', 'details', 'tell me about']):
+            intent = 'analyze'
+        else:
+            intent = 'general'
+        
+        output.extend([
+            f"🎯 Detected Intent: {intent}",
+            "",
+        ])
+        
+        # Route to appropriate handler
+        if intent == 'status_check' or intent == 'analyze':
+            if case_number:
+                output.append("→ Routing to: analyze_case")
+                output.append("")
+                # Call analyze_case internally
+                result = await call_tool("analyze_case", {"case_number": case_number, "depth": "full"})
+                return result
+            else:
+                output.append("⚠️ Please specify a case number for status check.")
+        
+        elif intent == 'follow_up':
+            if case_number:
+                output.append("→ Routing to: follow_up_case")
+                output.append("")
+                result = await call_tool("follow_up_case", {"case_number": case_number, "customer_question": request})
+                return result
+            else:
+                output.append("⚠️ Please specify a case number for follow-up.")
+        
+        elif intent == 'search':
+            # Extract search terms
+            search_terms = request.replace('find', '').replace('search', '').replace('cases about', '').replace('look for', '').strip()
+            output.append(f"→ Routing to: search_cases with query: '{search_terms}'")
+            output.append("")
+            result = await call_tool("search_cases", {"query_string": search_terms})
+            return result
+        
+        elif intent == 'closure_check':
+            if case_number:
+                output.append("→ Routing to: get_case_summary (closure check)")
+                output.append("")
+                result = await call_tool("get_case_summary", {"case_number": case_number})
+                return result
+            else:
+                output.append("⚠️ Please specify a case number for closure check.")
+        
+        elif intent == 'triage':
+            if case_number:
+                output.append("→ Routing to: triage_new_case")
+                output.append("")
+                result = await call_tool("triage_new_case", {"case_number": case_number})
+                return result
+            else:
+                output.append("⚠️ Please specify a case number for triage.")
+        
+        elif intent == 'kba_check':
+            if case_number:
+                output.append("→ Routing to: suggest_knowledge_article")
+                output.append("")
+                result = await call_tool("suggest_knowledge_article", {"case_number": case_number})
+                return result
+            else:
+                output.append("⚠️ Please specify a case number for KBA check.")
+        
+        else:
+            output.extend([
+                "🤔 I couldn't determine a specific intent.",
+                "",
+                "Available actions:",
+                "  • 'status of case XXXXXXXX' - Get case status",
+                "  • 'customer asking about case XXXXXXXX' - Generate follow-up response",
+                "  • 'find cases about [topic]' - Search for cases",
+                "  • 'ready to close case XXXXXXXX?' - Check closure readiness",
+                "  • 'triage case XXXXXXXX' - Triage a new case",
+                "  • 'create KBA for case XXXXXXXX' - Check KBA eligibility",
+            ])
+        
+        return [{"type": "text", "text": "\n".join(output)}]
 
     raise ValueError(f"Tool {name} not found")
 

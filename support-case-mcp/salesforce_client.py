@@ -43,7 +43,7 @@ class SalesforceClient:
             return None
 
     def _escape_sosl(self, text: str) -> str:
-        r"""
+        """
         Escapes reserved characters in SOSL search queries.
         Reserved: ? & | ! { } [ ] ( ) ^ ~ * : \ " ' + -
         """
@@ -240,244 +240,107 @@ class SalesforceClient:
             print(f"Error fetching articles for case {case_id}: {e}")
             return []
 
-    # ========== AI Summary Methods ==========
-
-    def get_case_emails(self, case_id: str) -> List[Dict[str, Any]]:
-        """Fetch email messages linked to a case for AI summarization"""
-        self.connect()
-        try:
-            query = f"""
-                SELECT Id, Subject, TextBody, HtmlBody, FromAddress, ToAddress, 
-                       MessageDate, Incoming, Status
-                FROM EmailMessage 
-                WHERE RelatedToId = '{case_id}' 
-                ORDER BY MessageDate DESC
-                LIMIT 50
-            """
-            result = self.sf.query(query)
-            return result.get('records', [])
-        except Exception as e:
-            print(f"Error fetching emails for case {case_id}: {e}")
-            return []
-
-    def get_case_for_ai_summary(self, case_number: str) -> Optional[Dict[str, Any]]:
+    def get_comprehensive_case_data(self, case_number: str, depth: str = "full") -> Optional[Dict[str, Any]]:
         """
-        Get case data optimized for AI summary generation.
-        Returns case description + all email messages in a structured format.
+        Get all case data in a single composite call for agentic workflows.
+        
+        Args:
+            case_number: The case number to fetch
+            depth: "quick" for basic info, "full" for complete data
+            
+        Returns:
+            Comprehensive case data with all related information
         """
-        case = self.get_case(case_number)
+        case = self.get_case_with_status(case_number)
         if not case:
             return None
         
         case_id = case['Id']
-        emails = self.get_case_emails(case_id)
-        comments = self.get_case_comments(case_id)
         
-        # Format emails for AI consumption
-        formatted_emails = []
-        for email in emails:
-            formatted_emails.append({
-                'date': email.get('MessageDate'),
-                'from': email.get('FromAddress'),
-                'to': email.get('ToAddress'),
-                'subject': email.get('Subject'),
-                'body': email.get('TextBody') or email.get('HtmlBody', ''),
-                'direction': 'inbound' if email.get('Incoming') else 'outbound'
-            })
+        # Determine closure readiness
+        fix_status = case.get('Fix_Status__c', '') or ''
+        validation_status = case.get('Validation_Status__c', '') or ''
         
-        # Format comments for AI consumption
-        formatted_comments = []
-        for comment in comments:
-            formatted_comments.append({
-                'date': comment.get('CreatedDate'),
-                'author': comment.get('CreatedBy', {}).get('Name') if comment.get('CreatedBy') else 'Unknown',
-                'body': comment.get('CommentBody', '')
-            })
+        if fix_status == 'Implemented' and validation_status == 'Completed':
+            closure_readiness = 'ready'
+        elif fix_status == 'Implemented':
+            closure_readiness = 'pending_validation'
+        else:
+            closure_readiness = 'in_progress'
         
-        return {
-            'case_number': case['CaseNumber'],
-            'subject': case['Subject'],
-            'description': case['Description'],
-            'status': case['Status'],
-            'priority': case['Priority'],
-            'contact_name': case.get('Contact', {}).get('Name') if case.get('Contact') else None,
-            'emails': formatted_emails,
-            'comments': formatted_comments,
-            'email_count': len(formatted_emails),
-            'comment_count': len(formatted_comments)
-        }
-
-    def update_case_ai_summary(self, case_number: str, summary: str) -> Dict[str, Any]:
-        """
-        Update the Case Summary (AI) field with the generated summary.
-        Assumes custom field: Case_Summary_AI__c (Long Text Area)
-        """
-        self.connect()
-        try:
-            # First get the case Id
-            case = self.get_case(case_number)
-            if not case:
-                return {'success': False, 'error': f'Case {case_number} not found'}
-            
-            case_id = case['Id']
-            
-            # Update the Case_Summary_AI__c field
-            self.sf.Case.update(case_id, {'Case_Summary_AI__c': summary})
-            
-            return {
-                'success': True,
-                'case_number': case_number,
-                'case_id': case_id,
-                'message': f'AI Summary updated for case {case_number}'
-            }
-        except Exception as e:
-            print(f"Error updating AI summary for case {case_number}: {e}")
-            return {'success': False, 'error': str(e)}
-
-    # ========== Knowledge Article Methods ==========
-
-    def search_knowledge_articles(self, query_text: str) -> List[Dict[str, Any]]:
-        """
-        Search Knowledge Base Articles by keyword/phrase.
-        Returns articles with title, number, summary, and URL.
-        """
-        self.connect()
-        try:
-            escaped_query = self._escape_sosl(query_text)
-            
-            # SOSL search on Knowledge articles (Knowledge__kav is the versioned article object)
-            sosl = f"""
-                FIND {{{escaped_query}}} IN ALL FIELDS 
-                RETURNING Knowledge__kav(
-                    Id, KnowledgeArticleId, ArticleNumber, Title, Summary, 
-                    UrlName, PublishStatus, VersionNumber, LastModifiedDate
-                    WHERE PublishStatus = 'Online'
-                )
-            """
-            
-            result = self.sf.search(sosl)
-            articles = result.get('searchRecords', [])
-            
-            # Format for cleaner output
-            formatted = []
-            for article in articles:
-                formatted.append({
-                    'id': article.get('Id'),
-                    'knowledge_article_id': article.get('KnowledgeArticleId'),
-                    'article_number': article.get('ArticleNumber'),
-                    'title': article.get('Title'),
-                    'summary': article.get('Summary'),
-                    'url_name': article.get('UrlName'),
-                    'version': article.get('VersionNumber'),
-                    'last_modified': article.get('LastModifiedDate')
-                })
-            
-            return formatted
-        except Exception as e:
-            print(f"Error searching knowledge articles: {e}")
-            return []
-
-    def get_knowledge_article(self, article_number: str) -> Optional[Dict[str, Any]]:
-        """
-        Get full Knowledge Article details by ArticleNumber.
-        Returns title, summary, and full content/details for AI summarization.
-        """
-        self.connect()
-        try:
-            # Query the Knowledge__kav object (versioned article)
-            # Note: The actual field names may vary based on your Salesforce Knowledge setup
-            query = f"""
-                SELECT Id, KnowledgeArticleId, ArticleNumber, Title, Summary,
-                       UrlName, PublishStatus, VersionNumber, 
-                       CreatedDate, LastModifiedDate,
-                       ArticleType
-                FROM Knowledge__kav 
-                WHERE ArticleNumber = '{self._escape_soql(article_number)}'
-                AND PublishStatus = 'Online'
-                ORDER BY VersionNumber DESC
-                LIMIT 1
-            """
-            
-            result = self.sf.query(query)
-            
-            if result['totalSize'] == 0:
-                return None
-            
-            article = result['records'][0]
-            article_id = article['Id']
-            
-            # Try to get the article body/content
-            # Note: Knowledge article body fields vary by record type
-            # Common fields: Details__c, Content__c, Solution__c, etc.
-            body_content = None
+        # Calculate days since last update
+        from datetime import datetime
+        last_modified = case.get('LastModifiedDate', '')
+        days_since_update = None
+        if last_modified:
             try:
-                # Try to get additional content fields
-                body_query = f"""
-                    SELECT Id, Details__c
-                    FROM Knowledge__kav 
-                    WHERE Id = '{article_id}'
-                """
-                body_result = self.sf.query(body_query)
-                if body_result['totalSize'] > 0:
-                    body_content = body_result['records'][0].get('Details__c')
+                lm_date = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
+                days_since_update = (datetime.now(lm_date.tzinfo) - lm_date).days
             except:
-                # Details__c field may not exist, that's okay
                 pass
-            
-            return {
-                'id': article['Id'],
-                'knowledge_article_id': article.get('KnowledgeArticleId'),
-                'article_number': article['ArticleNumber'],
-                'title': article['Title'],
-                'summary': article.get('Summary'),
-                'details': body_content,
-                'url_name': article.get('UrlName'),
-                'article_type': article.get('ArticleType'),
-                'version': article.get('VersionNumber'),
-                'publish_status': article.get('PublishStatus'),
-                'created_date': article.get('CreatedDate'),
-                'last_modified': article.get('LastModifiedDate')
+        
+        result = {
+            'case_info': {
+                'CaseNumber': case['CaseNumber'],
+                'Subject': case['Subject'],
+                'Description': case['Description'],
+                'Status': case['Status'],
+                'Priority': case['Priority'],
+                'CreatedDate': case.get('CreatedDate'),
+                'LastModifiedDate': case.get('LastModifiedDate'),
+                'ContactName': case.get('Contact', {}).get('Name') if case.get('Contact') else None,
+                'DaysSinceUpdate': days_since_update
+            },
+            'technical_summary': {
+                'fix_status': fix_status,
+                'validation_status': validation_status,
+                'closure_readiness': closure_readiness
             }
-        except Exception as e:
-            print(f"Error fetching knowledge article {article_number}: {e}")
-            return None
-
-    def update_kba_summary(self, article_number: str, summary: str) -> Dict[str, Any]:
-        """
-        Update the Summary field of a Knowledge Article.
-        Note: Updating Knowledge articles requires proper permissions and
-        may need to create a new draft version depending on Salesforce setup.
-        """
-        self.connect()
-        try:
-            # First get the article
-            article = self.get_knowledge_article(article_number)
-            if not article:
-                return {'success': False, 'error': f'Article {article_number} not found'}
-            
-            article_id = article['id']
-            
-            # Update the Summary field
-            # Note: This may require the article to be in Draft status
-            # depending on Salesforce Knowledge configuration
-            self.sf.Knowledge__kav.update(article_id, {'Summary': summary})
-            
-            return {
-                'success': True,
-                'article_number': article_number,
-                'article_id': article_id,
-                'title': article['title'],
-                'message': f'Summary updated for article {article_number}'
+        }
+        
+        if depth == "quick":
+            # Quick mode: just basic info + comments count
+            comments = self.get_case_comments(case_id)
+            result['metrics'] = {
+                'total_comments': len(comments),
+                'has_recent_activity': days_since_update is not None and days_since_update < 7
             }
-        except Exception as e:
-            error_msg = str(e)
-            # Provide helpful error message for common issues
-            if 'ENTITY_IS_LOCKED' in error_msg or 'published' in error_msg.lower():
-                return {
-                    'success': False, 
-                    'error': f'Article {article_number} is published and cannot be edited directly. '
-                             'Create a new draft version first.',
-                    'original_error': error_msg
-                }
-            print(f"Error updating KBA summary for article {article_number}: {e}")
-            return {'success': False, 'error': error_msg}
+            return result
+        
+        # Full mode: get everything
+        history = self.get_case_history(case_id)
+        comments = self.get_case_comments(case_id)
+        feed = self.get_case_feed(case_id)
+        related = self.get_related_cases(case_id, case['Subject'])
+        articles = self.get_case_articles(case_id)
+        
+        result['history'] = history[:10]
+        result['recent_comments'] = comments[:5]
+        result['feed_items'] = feed[:10]
+        result['related_cases'] = related[:5]
+        result['knowledge_articles'] = articles
+        
+        # Calculate metrics for insights
+        result['metrics'] = {
+            'total_comments': len(comments),
+            'total_history_changes': len(history),
+            'related_cases_count': len(related),
+            'articles_count': len(articles),
+            'has_recent_activity': days_since_update is not None and days_since_update < 7,
+            'days_since_update': days_since_update
+        }
+        
+        # Risk factors
+        risk_factors = []
+        if days_since_update and days_since_update > 14:
+            risk_factors.append("No activity for 14+ days")
+        if len(comments) == 0:
+            risk_factors.append("No comments on case")
+        if case['Priority'] == 'High' and closure_readiness != 'ready':
+            risk_factors.append("High priority case not yet resolved")
+        if len(related) > 3:
+            risk_factors.append("Multiple similar cases exist - possible systemic issue")
+        
+        result['risk_factors'] = risk_factors
+        
+        return result
