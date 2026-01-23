@@ -778,62 +778,70 @@ class SalesforceClient:
         Returns:
             Confirmation with article ID and URL
         """
+        import time
         self.connect()
         try:
-            # Generate URL name if not provided
+            # Generate URL name if not provided - include timestamp to ensure uniqueness
             if not url_name:
-                url_name = title.lower().replace(' ', '-').replace('/', '-')[:50]
+                base_url = title.lower().replace(' ', '-').replace('/', '-')[:40]
                 # Remove special characters
-                url_name = ''.join(c for c in url_name if c.isalnum() or c == '-')
+                base_url = ''.join(c for c in base_url if c.isalnum() or c == '-')
+                # Add timestamp to ensure uniqueness
+                url_name = f"{base_url}-{int(time.time())}"
+            else:
+                # If url_name provided, sanitize it
+                url_name = ''.join(c for c in url_name if c.isalnum() or c == '-')[:50]
             
-            # Create Knowledge Article (Draft)
-            # Note: The exact object name may vary (Knowledge__kav, Knowledge, etc.)
+            # Create Knowledge Article (Draft) with all required fields
             article_data = {
                 'Title': title,
                 'Summary': summary,
                 'UrlName': url_name,
-                # 'Details__c': content,  # Field name may vary by org
+                'Language': 'en_US',  # Required field
+                'IsVisibleInPkb': True,  # Public Knowledge Base visibility
+                'IsVisibleInCsp': True,  # Customer Portal visibility
+                'IsVisibleInPrm': False,  # Partner Portal visibility
             }
             
-            # #region agent log - Hypothesis A,B,D: Log article_data being sent
-            logger.info(f"DEBUG [A,B,D] article_data payload: {article_data}, url_name: {url_name}, title: {title}")
+            # #region agent log - Log article_data being sent
+            logger.info(f"DEBUG [POST-FIX] article_data payload: {article_data}")
             # #endregion
             
-            # #region agent log - Hypothesis B,C: Get Knowledge__kav describe to check available fields
-            try:
-                kav_describe = self.sf.Knowledge__kav.describe()
-                kav_fields = [f['name'] for f in kav_describe.get('fields', [])[:20]]
-                required_fields = [f['name'] for f in kav_describe.get('fields', []) if not f['nillable'] and f['createable']]
-                logger.info(f"DEBUG [B,C] Knowledge__kav first_20_fields: {kav_fields}")
-                logger.info(f"DEBUG [B,C] Knowledge__kav required_createable_fields: {required_fields}")
-            except Exception as desc_err:
-                logger.info(f"DEBUG [C] describe failed: {desc_err}")
-            # #endregion
+            # Try to create the article with retry on duplicate UrlName
+            max_retries = 3
+            article_id = None
+            last_error = None
             
-            # Try to create the article
-            try:
-                result = self.sf.Knowledge__kav.create(article_data)
-                article_id = result.get('id')
-                # #region agent log - Success case
-                logger.info(f"DEBUG [SUCCESS] create succeeded: {result}, article_id: {article_id}")
-                # #endregion
-            except Exception as kav_error:
-                # #region agent log - Hypothesis A,B,E: Log full error details
-                error_details = {"error_type": type(kav_error).__name__, "error_str": str(kav_error)}
-                if hasattr(kav_error, 'content'): error_details['content'] = str(kav_error.content)
-                if hasattr(kav_error, 'response'): error_details['response'] = str(getattr(kav_error.response, 'text', ''))
-                logger.info(f"DEBUG [A,B,E] Knowledge__kav.create FAILED: {error_details}")
-                # #endregion
-                # Try alternative Knowledge object
+            for attempt in range(max_retries):
                 try:
-                    result = self.sf.KnowledgeArticle.create(article_data)
+                    result = self.sf.Knowledge__kav.create(article_data)
                     article_id = result.get('id')
-                except:
-                    return {
-                        'success': False,
-                        'error': f'Could not create Knowledge Article. Error: {str(kav_error)}. '
-                                'Knowledge may not be enabled or accessible in this org.'
-                    }
+                    logger.info(f"DEBUG [SUCCESS] create succeeded on attempt {attempt + 1}: article_id={article_id}")
+                    break
+                except Exception as kav_error:
+                    last_error = kav_error
+                    error_str = str(kav_error)
+                    logger.info(f"DEBUG [ATTEMPT {attempt + 1}] Knowledge__kav.create failed: {error_str}")
+                    
+                    # Check if it's a duplicate UrlName error - retry with new unique suffix
+                    if 'DUPLICATE_VALUE' in error_str and 'UrlName' in error_str:
+                        # Generate new unique UrlName with timestamp + attempt
+                        base_url = title.lower().replace(' ', '-').replace('/', '-')[:35]
+                        base_url = ''.join(c for c in base_url if c.isalnum() or c == '-')
+                        url_name = f"{base_url}-{int(time.time())}-{attempt + 1}"
+                        article_data['UrlName'] = url_name
+                        logger.info(f"DEBUG [RETRY] Retrying with new UrlName: {url_name}")
+                        continue
+                    else:
+                        # Non-duplicate error, don't retry
+                        break
+            
+            # If all retries failed
+            if article_id is None:
+                return {
+                    'success': False,
+                    'error': f'Could not create Knowledge Article after {max_retries} attempts. Last error: {str(last_error)}'
+                }
             
             # Link to case if provided
             if case_number and article_id:
