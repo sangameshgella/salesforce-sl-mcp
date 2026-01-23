@@ -796,7 +796,7 @@ class SalesforceClient:
             }
             
             # #region agent log - Hypothesis A,B,D: Log article_data being sent
-            import json as _json; open('/Users/sangameshgella/Downloads/Projects/sl/.cursor/debug.log', 'a').write(_json.dumps({"hypothesisId": "A,B,D", "location": "salesforce_client.py:create_knowledge_article", "message": "article_data payload", "data": {"article_data": article_data, "url_name": url_name, "title": title}, "timestamp": __import__('time').time(), "sessionId": "debug-session"}) + '\n')
+            logger.info(f"DEBUG [A,B,D] article_data payload: {article_data}, url_name: {url_name}, title: {title}")
             # #endregion
             
             # #region agent log - Hypothesis B,C: Get Knowledge__kav describe to check available fields
@@ -804,9 +804,10 @@ class SalesforceClient:
                 kav_describe = self.sf.Knowledge__kav.describe()
                 kav_fields = [f['name'] for f in kav_describe.get('fields', [])[:20]]
                 required_fields = [f['name'] for f in kav_describe.get('fields', []) if not f['nillable'] and f['createable']]
-                open('/Users/sangameshgella/Downloads/Projects/sl/.cursor/debug.log', 'a').write(_json.dumps({"hypothesisId": "B,C", "location": "salesforce_client.py:create_knowledge_article", "message": "Knowledge__kav fields", "data": {"first_20_fields": kav_fields, "required_createable_fields": required_fields}, "timestamp": __import__('time').time(), "sessionId": "debug-session"}) + '\n')
+                logger.info(f"DEBUG [B,C] Knowledge__kav first_20_fields: {kav_fields}")
+                logger.info(f"DEBUG [B,C] Knowledge__kav required_createable_fields: {required_fields}")
             except Exception as desc_err:
-                open('/Users/sangameshgella/Downloads/Projects/sl/.cursor/debug.log', 'a').write(_json.dumps({"hypothesisId": "C", "location": "salesforce_client.py:create_knowledge_article", "message": "describe failed", "data": {"error": str(desc_err)}, "timestamp": __import__('time').time(), "sessionId": "debug-session"}) + '\n')
+                logger.info(f"DEBUG [C] describe failed: {desc_err}")
             # #endregion
             
             # Try to create the article
@@ -814,14 +815,14 @@ class SalesforceClient:
                 result = self.sf.Knowledge__kav.create(article_data)
                 article_id = result.get('id')
                 # #region agent log - Success case
-                open('/Users/sangameshgella/Downloads/Projects/sl/.cursor/debug.log', 'a').write(_json.dumps({"hypothesisId": "SUCCESS", "location": "salesforce_client.py:create_knowledge_article", "message": "create succeeded", "data": {"result": str(result), "article_id": article_id}, "timestamp": __import__('time').time(), "sessionId": "debug-session"}) + '\n')
+                logger.info(f"DEBUG [SUCCESS] create succeeded: {result}, article_id: {article_id}")
                 # #endregion
             except Exception as kav_error:
                 # #region agent log - Hypothesis A,B,E: Log full error details
-                error_details = {"error_type": type(kav_error).__name__, "error_str": str(kav_error), "error_repr": repr(kav_error)}
+                error_details = {"error_type": type(kav_error).__name__, "error_str": str(kav_error)}
                 if hasattr(kav_error, 'content'): error_details['content'] = str(kav_error.content)
                 if hasattr(kav_error, 'response'): error_details['response'] = str(getattr(kav_error.response, 'text', ''))
-                open('/Users/sangameshgella/Downloads/Projects/sl/.cursor/debug.log', 'a').write(_json.dumps({"hypothesisId": "A,B,E", "location": "salesforce_client.py:create_knowledge_article", "message": "Knowledge__kav.create FAILED", "data": error_details, "timestamp": __import__('time').time(), "sessionId": "debug-session"}) + '\n')
+                logger.info(f"DEBUG [A,B,E] Knowledge__kav.create FAILED: {error_details}")
                 # #endregion
                 # Try alternative Knowledge object
                 try:
