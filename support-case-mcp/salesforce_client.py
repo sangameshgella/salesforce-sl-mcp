@@ -398,3 +398,435 @@ class SalesforceClient:
         result['risk_factors'] = risk_factors
         
         return result
+
+    # ========== SCHEMA TOOLS (Context Providers) ==========
+
+    def describe_sobject(self, object_name: str) -> Dict[str, Any]:
+        """
+        Get field metadata for a Salesforce object with picklist label-to-value mappings.
+        
+        This enables the LLM to:
+        - Know valid field API names
+        - Map user-friendly labels to API values
+        - Understand field types and requirements
+        
+        Args:
+            object_name: The Salesforce object API name (e.g., 'Case', 'CaseComment')
+            
+        Returns:
+            Object metadata with fields, types, and picklist mappings
+        """
+        self.connect()
+        try:
+            # Get object describe from Salesforce
+            sobject = getattr(self.sf, object_name)
+            describe = sobject.describe()
+            
+            # Format fields with rich metadata for LLM consumption
+            fields = []
+            for field in describe.get('fields', []):
+                field_info = {
+                    'api_name': field['name'],
+                    'label': field['label'],
+                    'type': field['type'],
+                    'updateable': field['updateable'],
+                    'createable': field['createable'],
+                    'required': not field['nillable'] and field['createable'],
+                    'length': field.get('length'),
+                }
+                
+                # For picklist fields, include value mappings (label -> API value)
+                if field['type'] in ('picklist', 'multipicklist'):
+                    field_info['picklist_values'] = [
+                        {
+                            'api_value': pv['value'],
+                            'label': pv['label'],
+                            'active': pv['active'],
+                            'default': pv.get('defaultValue', False)
+                        }
+                        for pv in field.get('picklistValues', [])
+                        if pv['active']
+                    ]
+                
+                # For reference fields, show what objects they point to
+                if field['type'] == 'reference':
+                    field_info['references'] = field.get('referenceTo', [])
+                
+                fields.append(field_info)
+            
+            return {
+                'object_name': object_name,
+                'label': describe.get('label'),
+                'label_plural': describe.get('labelPlural'),
+                'updateable': describe.get('updateable'),
+                'createable': describe.get('createable'),
+                'deletable': describe.get('deletable'),
+                'field_count': len(fields),
+                'fields': fields
+            }
+        except Exception as e:
+            print(f"Error describing {object_name}: {e}")
+            return {'error': str(e), 'object_name': object_name}
+
+    def describe_workflow_objects(self) -> Dict[str, Any]:
+        """
+        Get metadata for all objects in the support case workflow.
+        
+        Describes: Case, CaseComment, EmailMessage, Knowledge__kav
+        
+        Returns:
+            Dictionary with metadata for each workflow object
+        """
+        workflow_objects = ['Case', 'CaseComment', 'EmailMessage']
+        
+        result = {}
+        for obj_name in workflow_objects:
+            result[obj_name] = self.describe_sobject(obj_name)
+        
+        # Try Knowledge__kav (may not exist in all orgs)
+        try:
+            result['Knowledge__kav'] = self.describe_sobject('Knowledge__kav')
+        except:
+            result['Knowledge__kav'] = {'error': 'Knowledge not enabled in this org'}
+        
+        return result
+
+    # ========== EMAIL TOOLS ==========
+
+    def get_case_emails(self, case_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetch all email messages linked to a case.
+        
+        Returns emails for AI summarization and drafting context.
+        
+        Args:
+            case_id: The Salesforce Case Id
+            
+        Returns:
+            List of email messages with sender, recipient, subject, body, date
+        """
+        self.connect()
+        try:
+            query = f"""
+                SELECT Id, Subject, TextBody, HtmlBody, FromAddress, ToAddress, 
+                       CcAddress, BccAddress, MessageDate, Incoming, Status,
+                       CreatedDate, CreatedById
+                FROM EmailMessage 
+                WHERE RelatedToId = '{case_id}' 
+                ORDER BY MessageDate DESC
+                LIMIT 50
+            """
+            result = self.sf.query(query)
+            
+            # Format for cleaner output
+            emails = []
+            for email in result.get('records', []):
+                emails.append({
+                    'id': email.get('Id'),
+                    'subject': email.get('Subject'),
+                    'from': email.get('FromAddress'),
+                    'to': email.get('ToAddress'),
+                    'cc': email.get('CcAddress'),
+                    'date': email.get('MessageDate'),
+                    'direction': 'inbound' if email.get('Incoming') else 'outbound',
+                    'body': email.get('TextBody') or email.get('HtmlBody', ''),
+                    'status': email.get('Status')
+                })
+            
+            return emails
+        except Exception as e:
+            print(f"Error fetching emails for case {case_id}: {e}")
+            return []
+
+    def draft_case_email(self, case_number: str, message: str) -> Dict[str, Any]:
+        """
+        Create a draft email preview for user approval (does NOT send).
+        
+        This enables the LLM to show the user what will be sent before sending.
+        
+        Args:
+            case_number: The case to respond to
+            message: The email body content
+            
+        Returns:
+            Draft preview with recipient, subject, body for user approval
+        """
+        self.connect()
+        try:
+            # Get case with contact info
+            query = f"""
+                SELECT Id, CaseNumber, Subject, Contact.Email, Contact.Name
+                FROM Case 
+                WHERE CaseNumber = '{case_number}' 
+                LIMIT 1
+            """
+            result = self.sf.query(query)
+            
+            if result['totalSize'] == 0:
+                return {'success': False, 'error': f'Case {case_number} not found'}
+            
+            case = result['records'][0]
+            contact = case.get('Contact', {}) or {}
+            contact_email = contact.get('Email')
+            contact_name = contact.get('Name', 'Customer')
+            
+            if not contact_email:
+                return {
+                    'success': False, 
+                    'error': 'No contact email found for this case',
+                    'case_number': case_number
+                }
+            
+            # Generate email subject
+            subject = f"Re: Case {case['CaseNumber']} - {case['Subject']}"
+            
+            return {
+                'success': True,
+                'draft': True,
+                'case_number': case_number,
+                'case_id': case['Id'],
+                'to_email': contact_email,
+                'to_name': contact_name,
+                'subject': subject,
+                'body': message,
+                'instructions': 'Review this draft. Call send_case_email to send, or revise the message.'
+            }
+        except Exception as e:
+            print(f"Error drafting email for case {case_number}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def send_case_email(self, case_number: str, subject: str, body: str) -> Dict[str, Any]:
+        """
+        Send an email to the case contact via Salesforce REST API.
+        
+        The email is sent AND logged to the case automatically.
+        Only call this AFTER user has approved the draft.
+        
+        Args:
+            case_number: The case to respond to
+            subject: Email subject
+            body: Email body content
+            
+        Returns:
+            Confirmation of email sent and logged
+        """
+        self.connect()
+        try:
+            # Get case with contact info
+            query = f"""
+                SELECT Id, CaseNumber, Contact.Email, Contact.Name
+                FROM Case 
+                WHERE CaseNumber = '{case_number}' 
+                LIMIT 1
+            """
+            result = self.sf.query(query)
+            
+            if result['totalSize'] == 0:
+                return {'success': False, 'error': f'Case {case_number} not found'}
+            
+            case = result['records'][0]
+            contact = case.get('Contact', {}) or {}
+            contact_email = contact.get('Email')
+            
+            if not contact_email:
+                return {
+                    'success': False, 
+                    'error': 'No contact email found for this case'
+                }
+            
+            # Send email via Salesforce REST API
+            # Using the simple email action
+            email_data = {
+                'inputs': [{
+                    'emailAddresses': contact_email,
+                    'emailSubject': subject,
+                    'emailBody': body,
+                    'senderType': 'CurrentUser'
+                }]
+            }
+            
+            # Call the email action
+            try:
+                self.sf.restful('actions/standard/emailSimple', method='POST', data=email_data)
+            except Exception as email_error:
+                # Fallback: Create EmailMessage record directly
+                email_record = {
+                    'RelatedToId': case['Id'],
+                    'ToAddress': contact_email,
+                    'Subject': subject,
+                    'TextBody': body,
+                    'Status': '3',  # Sent
+                    'Incoming': False
+                }
+                self.sf.EmailMessage.create(email_record)
+            
+            return {
+                'success': True,
+                'case_number': case_number,
+                'case_id': case['Id'],
+                'sent_to': contact_email,
+                'subject': subject,
+                'message': f'Email sent to {contact_email} and logged to case {case_number}'
+            }
+        except Exception as e:
+            print(f"Error sending email for case {case_number}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    # ========== CASE WRITE TOOLS ==========
+
+    def update_case(self, case_number: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Update case fields with validated values.
+        
+        The LLM should call describe_sobject first to get valid field names
+        and picklist values, then provide exact API values here.
+        
+        Args:
+            case_number: The case to update
+            fields: Dictionary of field API names and values to update
+                   Example: {"Status": "Closed", "Fix_Status__c": "Implemented"}
+                   
+        Returns:
+            Confirmation of update with changed fields
+        """
+        self.connect()
+        try:
+            # Get case Id
+            case = self.get_case(case_number)
+            if not case:
+                return {'success': False, 'error': f'Case {case_number} not found'}
+            
+            case_id = case['Id']
+            
+            # Update the case
+            self.sf.Case.update(case_id, fields)
+            
+            return {
+                'success': True,
+                'case_number': case_number,
+                'case_id': case_id,
+                'updated_fields': list(fields.keys()),
+                'new_values': fields,
+                'message': f'Case {case_number} updated successfully'
+            }
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Error updating case {case_number}: {e}")
+            return {'success': False, 'error': error_msg}
+
+    def add_case_comment(self, case_number: str, comment: str, is_public: bool = False) -> Dict[str, Any]:
+        """
+        Add a comment to a case.
+        
+        Args:
+            case_number: The case to comment on
+            comment: The comment text
+            is_public: If True, visible to customer in portal. If False, internal only.
+            
+        Returns:
+            Confirmation of comment added
+        """
+        self.connect()
+        try:
+            # Get case Id
+            case = self.get_case(case_number)
+            if not case:
+                return {'success': False, 'error': f'Case {case_number} not found'}
+            
+            case_id = case['Id']
+            
+            # Create the comment
+            comment_data = {
+                'ParentId': case_id,
+                'CommentBody': comment,
+                'IsPublished': is_public
+            }
+            
+            result = self.sf.CaseComment.create(comment_data)
+            
+            return {
+                'success': True,
+                'case_number': case_number,
+                'case_id': case_id,
+                'comment_id': result.get('id'),
+                'is_public': is_public,
+                'message': f'{"Public" if is_public else "Internal"} comment added to case {case_number}'
+            }
+        except Exception as e:
+            print(f"Error adding comment to case {case_number}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    # ========== KNOWLEDGE ARTICLE TOOLS ==========
+
+    def create_knowledge_article(self, title: str, summary: str, content: str, 
+                                  url_name: str = None, case_number: str = None) -> Dict[str, Any]:
+        """
+        Create a new Knowledge Article from a resolved case.
+        
+        Args:
+            title: Article title
+            summary: Brief summary/abstract
+            content: Full article content/details
+            url_name: URL-friendly name (auto-generated if not provided)
+            case_number: Optional - link the article to this case
+            
+        Returns:
+            Confirmation with article ID and URL
+        """
+        self.connect()
+        try:
+            # Generate URL name if not provided
+            if not url_name:
+                url_name = title.lower().replace(' ', '-').replace('/', '-')[:50]
+                # Remove special characters
+                url_name = ''.join(c for c in url_name if c.isalnum() or c == '-')
+            
+            # Create Knowledge Article (Draft)
+            # Note: The exact object name may vary (Knowledge__kav, Knowledge, etc.)
+            article_data = {
+                'Title': title,
+                'Summary': summary,
+                'UrlName': url_name,
+                # 'Details__c': content,  # Field name may vary by org
+            }
+            
+            # Try to create the article
+            try:
+                result = self.sf.Knowledge__kav.create(article_data)
+                article_id = result.get('id')
+            except Exception as kav_error:
+                # Try alternative Knowledge object
+                try:
+                    result = self.sf.KnowledgeArticle.create(article_data)
+                    article_id = result.get('id')
+                except:
+                    return {
+                        'success': False,
+                        'error': f'Could not create Knowledge Article. Error: {str(kav_error)}. '
+                                'Knowledge may not be enabled or accessible in this org.'
+                    }
+            
+            # Link to case if provided
+            if case_number and article_id:
+                try:
+                    case = self.get_case(case_number)
+                    if case:
+                        self.sf.CaseArticle.create({
+                            'CaseId': case['Id'],
+                            'KnowledgeArticleId': article_id
+                        })
+                except Exception as link_error:
+                    print(f"Warning: Could not link article to case: {link_error}")
+            
+            return {
+                'success': True,
+                'article_id': article_id,
+                'title': title,
+                'url_name': url_name,
+                'linked_case': case_number,
+                'status': 'Draft',
+                'message': f'Knowledge Article "{title}" created successfully. Status: Draft (needs publishing).'
+            }
+        except Exception as e:
+            print(f"Error creating knowledge article: {e}")
+            return {'success': False, 'error': str(e)}

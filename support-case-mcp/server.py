@@ -166,6 +166,104 @@ async def list_tools():
                 "required": ["request"],
             },
         ),
+        # ========== SCHEMA TOOLS (Call before any write operation) ==========
+        Tool(
+            name="describe_sobject",
+            description="Get field metadata for a Salesforce object. MUST call this BEFORE any update operation to know valid field names, data types, and picklist values. Returns field API names, labels, types, and valid picklist options with both display labels and API values. Use this to map user-friendly terms (like 'closed') to exact API values (like 'Closed').",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "object_name": {"type": "string", "description": "Salesforce object API name (e.g., 'Case', 'CaseComment', 'EmailMessage')"}
+                },
+                "required": ["object_name"],
+            },
+        ),
+        Tool(
+            name="describe_workflow_objects",
+            description="Get field metadata for ALL objects in the support case workflow (Case, CaseComment, EmailMessage, Knowledge). Call this at the start of a session or before complex multi-object operations to understand all available fields and valid values across the workflow.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+        # ========== EMAIL TOOLS ==========
+        Tool(
+            name="get_case_emails",
+            description="Fetch all email messages linked to a case. Returns the complete email thread with sender, recipient, subject, body, and date. Use this to understand customer communication history before drafting a response.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_number": {"type": "string", "description": "The Case Number"}
+                },
+                "required": ["case_number"],
+            },
+        ),
+        Tool(
+            name="draft_case_email",
+            description="Create a draft email preview for user approval. Does NOT send the email. Use this BEFORE send_case_email to show the user what will be sent. Returns draft with recipient, subject, and body for review.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_number": {"type": "string", "description": "The Case Number to respond to"},
+                    "message": {"type": "string", "description": "The email body content"}
+                },
+                "required": ["case_number", "message"],
+            },
+        ),
+        Tool(
+            name="send_case_email",
+            description="Send an email to the case contact. ONLY call this AFTER the user has approved a draft from draft_case_email. The email is sent via Salesforce and automatically logged to the case. Always confirm with user before calling this.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_number": {"type": "string", "description": "The Case Number"},
+                    "subject": {"type": "string", "description": "Email subject line"},
+                    "body": {"type": "string", "description": "Email body content"}
+                },
+                "required": ["case_number", "subject", "body"],
+            },
+        ),
+        # ========== CASE WRITE TOOLS ==========
+        Tool(
+            name="update_case",
+            description="Update case fields. MUST call describe_sobject('Case') first to get valid field names and picklist values. Provide exact API field names and values. Example: {\"Status\": \"Closed\", \"Fix_Status__c\": \"Implemented\"}. The LLM must map user terms to exact API values using describe data.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_number": {"type": "string", "description": "The Case Number to update"},
+                    "fields": {"type": "object", "description": "Dictionary of field API names and values to update"}
+                },
+                "required": ["case_number", "fields"],
+            },
+        ),
+        Tool(
+            name="add_case_comment",
+            description="Add a comment to a case. Use this to log internal notes or public responses. Set is_public=true for comments visible to customer in portal, false for internal team notes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_number": {"type": "string", "description": "The Case Number"},
+                    "comment": {"type": "string", "description": "The comment text"},
+                    "is_public": {"type": "boolean", "description": "True = visible to customer, False = internal only", "default": False}
+                },
+                "required": ["case_number", "comment"],
+            },
+        ),
+        # ========== KNOWLEDGE ARTICLE TOOLS ==========
+        Tool(
+            name="create_knowledge_article",
+            description="Create a new Knowledge Article from a resolved case. Use this after suggest_knowledge_article confirms eligibility and user approves. Creates article in Draft status (requires manual publishing in Salesforce).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Article title"},
+                    "summary": {"type": "string", "description": "Brief summary/abstract"},
+                    "content": {"type": "string", "description": "Full article content/details"},
+                    "case_number": {"type": "string", "description": "Optional - link article to this case"}
+                },
+                "required": ["title", "summary", "content"],
+            },
+        ),
     ]
 
 def _add_suggestions(text: str, suggestions: list) -> list:
@@ -868,6 +966,236 @@ Case Reference: {case_info['CaseNumber']}"""
                 "  • 'triage case XXXXXXXX' - Triage a new case",
                 "  • 'create KBA for case XXXXXXXX' - Check KBA eligibility",
             ])
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    # ========== SCHEMA TOOL HANDLERS ==========
+    
+    elif name == "describe_sobject":
+        object_name = arguments.get("object_name")
+        if not object_name:
+            return [{"type": "text", "text": "Error: object_name is required."}]
+        
+        result = sf_client.describe_sobject(object_name)
+        
+        if 'error' in result:
+            return [{"type": "text", "text": f"Error describing {object_name}: {result['error']}"}]
+        
+        # Format output for LLM consumption
+        output = [
+            f"=== {result['label']} ({object_name}) Schema ===",
+            f"Updateable: {result['updateable']} | Createable: {result['createable']}",
+            f"Total Fields: {result['field_count']}",
+            "",
+            "--- Updateable Fields (most relevant for updates) ---"
+        ]
+        
+        # Show updateable fields with picklist values
+        updateable_fields = [f for f in result['fields'] if f['updateable']]
+        for field in updateable_fields[:30]:  # Limit to 30 most relevant
+            field_line = f"  {field['api_name']} ({field['type']})"
+            if field['required']:
+                field_line += " [REQUIRED]"
+            output.append(field_line)
+            output.append(f"    Label: {field['label']}")
+            
+            # Show picklist values
+            if 'picklist_values' in field and field['picklist_values']:
+                output.append("    Valid values:")
+                for pv in field['picklist_values'][:10]:  # Limit picklist display
+                    default_marker = " [default]" if pv.get('default') else ""
+                    output.append(f"      - \"{pv['api_value']}\" (label: {pv['label']}){default_marker}")
+        
+        output.append("")
+        output.append("Use exact api_value strings when calling update_case.")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "describe_workflow_objects":
+        result = sf_client.describe_workflow_objects()
+        
+        output = [
+            "=== Support Case Workflow Objects ===",
+            ""
+        ]
+        
+        for obj_name, obj_data in result.items():
+            if 'error' in obj_data:
+                output.append(f"{obj_name}: {obj_data['error']}")
+            else:
+                updateable_count = len([f for f in obj_data.get('fields', []) if f.get('updateable')])
+                output.append(f"{obj_name}: {obj_data.get('field_count', 0)} fields ({updateable_count} updateable)")
+        
+        output.append("")
+        output.append("Use describe_sobject for detailed field info on any object.")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    # ========== EMAIL TOOL HANDLERS ==========
+    
+    elif name == "get_case_emails":
+        case_number = arguments.get("case_number")
+        case = sf_client.get_case(case_number)
+        if not case:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
+        
+        emails = sf_client.get_case_emails(case['Id'])
+        if not emails:
+            return [{"type": "text", "text": f"No emails found for case {case_number}."}]
+        
+        output = [f"=== Email Thread for Case {case_number} ===", f"Total: {len(emails)} emails", ""]
+        
+        for i, email in enumerate(emails, 1):
+            direction = email['direction'].upper()
+            output.append(f"[{i}] [{direction}] {email['date']}")
+            output.append(f"    From: {email['from']}")
+            output.append(f"    To: {email['to']}")
+            output.append(f"    Subject: {email['subject']}")
+            body_preview = (email['body'] or '')[:300].replace('\n', ' ')
+            if len(email['body'] or '') > 300:
+                body_preview += "..."
+            output.append(f"    Body: {body_preview}")
+            output.append("")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "draft_case_email":
+        case_number = arguments.get("case_number")
+        message = arguments.get("message")
+        
+        if not message:
+            return [{"type": "text", "text": "Error: message is required."}]
+        
+        result = sf_client.draft_case_email(case_number, message)
+        
+        if not result['success']:
+            return [{"type": "text", "text": f"Error: {result['error']}"}]
+        
+        output = [
+            "=== DRAFT EMAIL (Review Before Sending) ===",
+            "",
+            f"To: {result['to_name']} <{result['to_email']}>",
+            f"Subject: {result['subject']}",
+            "",
+            "--- Body ---",
+            result['body'],
+            "--- End ---",
+            "",
+            "⚠️ This is a DRAFT. Call send_case_email to send this email.",
+            "   Or modify the message and call draft_case_email again."
+        ]
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "send_case_email":
+        case_number = arguments.get("case_number")
+        subject = arguments.get("subject")
+        body = arguments.get("body")
+        
+        if not all([subject, body]):
+            return [{"type": "text", "text": "Error: subject and body are required."}]
+        
+        result = sf_client.send_case_email(case_number, subject, body)
+        
+        if not result['success']:
+            return [{"type": "text", "text": f"Error sending email: {result['error']}"}]
+        
+        output = [
+            "✅ EMAIL SENT SUCCESSFULLY",
+            "",
+            f"Case: {result['case_number']}",
+            f"Sent to: {result['sent_to']}",
+            f"Subject: {result['subject']}",
+            "",
+            "The email has been logged to the case automatically.",
+            "",
+            "💡 SUGGESTED: Add a case comment to log this action."
+        ]
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    # ========== CASE WRITE TOOL HANDLERS ==========
+    
+    elif name == "update_case":
+        case_number = arguments.get("case_number")
+        fields = arguments.get("fields")
+        
+        if not fields or not isinstance(fields, dict):
+            return [{"type": "text", "text": "Error: fields must be a dictionary of field names and values."}]
+        
+        result = sf_client.update_case(case_number, fields)
+        
+        if not result['success']:
+            return [{"type": "text", "text": f"Error updating case: {result['error']}"}]
+        
+        output = [
+            "✅ CASE UPDATED SUCCESSFULLY",
+            "",
+            f"Case: {result['case_number']}",
+            "Updated fields:"
+        ]
+        for field, value in result['new_values'].items():
+            output.append(f"  • {field}: {value}")
+        
+        output.append("")
+        output.append("💡 SUGGESTED: Add a comment to document this change.")
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    elif name == "add_case_comment":
+        case_number = arguments.get("case_number")
+        comment = arguments.get("comment")
+        is_public = arguments.get("is_public", False)
+        
+        if not comment:
+            return [{"type": "text", "text": "Error: comment is required."}]
+        
+        result = sf_client.add_case_comment(case_number, comment, is_public)
+        
+        if not result['success']:
+            return [{"type": "text", "text": f"Error adding comment: {result['error']}"}]
+        
+        visibility = "Public (visible to customer)" if is_public else "Internal (team only)"
+        output = [
+            "✅ COMMENT ADDED",
+            "",
+            f"Case: {result['case_number']}",
+            f"Visibility: {visibility}",
+            f"Comment ID: {result['comment_id']}",
+        ]
+        
+        return [{"type": "text", "text": "\n".join(output)}]
+
+    # ========== KNOWLEDGE ARTICLE TOOL HANDLERS ==========
+    
+    elif name == "create_knowledge_article":
+        title = arguments.get("title")
+        summary = arguments.get("summary")
+        content = arguments.get("content")
+        case_number = arguments.get("case_number")
+        
+        if not all([title, summary, content]):
+            return [{"type": "text", "text": "Error: title, summary, and content are required."}]
+        
+        result = sf_client.create_knowledge_article(title, summary, content, case_number=case_number)
+        
+        if not result['success']:
+            return [{"type": "text", "text": f"Error creating article: {result['error']}"}]
+        
+        output = [
+            "✅ KNOWLEDGE ARTICLE CREATED",
+            "",
+            f"Title: {result['title']}",
+            f"Article ID: {result['article_id']}",
+            f"URL Name: {result['url_name']}",
+            f"Status: {result['status']}",
+        ]
+        
+        if result.get('linked_case'):
+            output.append(f"Linked to case: {result['linked_case']}")
+        
+        output.append("")
+        output.append("Note: Article is in Draft status. Publish it in Salesforce to make it available.")
         
         return [{"type": "text", "text": "\n".join(output)}]
 
