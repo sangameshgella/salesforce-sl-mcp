@@ -1,9 +1,14 @@
 import os
+import logging
 from typing import Dict, Any, List, Optional
 from simple_salesforce import Salesforce
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Configure logging
+logger = logging.getLogger("salesforce_client")
+logger.setLevel(logging.DEBUG)
 
 class SalesforceClient:
     def __init__(self):
@@ -39,7 +44,7 @@ class SalesforceClient:
                 return record
             return None
         except Exception as e:
-            print(f"Error fetching case {case_number}: {e}")
+            logger.error(f"Error fetching case {case_number}: {e}")
             return None
 
     def _escape_sosl(self, text: str) -> str:
@@ -95,7 +100,7 @@ class SalesforceClient:
             result = self.sf.search(sosl)
             return result.get('searchRecords', [])
         except Exception as e:
-            print(f"Error in SOSL search: {e}")
+            logger.error(f"Error in SOSL search: {e}")
             return []
 
     def _search_cases_fuzzy(self, query_text: str) -> List[Dict[str, Any]]:
@@ -133,7 +138,7 @@ class SalesforceClient:
             result = self.sf.query(query)
             return result.get('records', [])
         except Exception as e:
-            print(f"Error in fuzzy SOQL search: {e}")
+            logger.error(f"Error in fuzzy SOQL search: {e}")
             return []
 
     def get_case_comments(self, case_id: str) -> List[Dict[str, Any]]:
@@ -143,7 +148,7 @@ class SalesforceClient:
             result = self.sf.query(query)
             return result.get('records', [])
         except Exception as e:
-             print(f"Error fetching comments for {case_id}: {e}")
+             logger.error(f"Error fetching comments for {case_id}: {e}")
              return []
 
     def get_case_history(self, case_id: str) -> List[Dict[str, Any]]:
@@ -160,7 +165,7 @@ class SalesforceClient:
             result = self.sf.query(query)
             return result.get('records', [])
         except Exception as e:
-            print(f"Error fetching history for {case_id}: {e}")
+            logger.error(f"Error fetching history for {case_id}: {e}")
             return []
 
     def get_case_feed(self, case_id: str) -> List[Dict[str, Any]]:
@@ -177,7 +182,7 @@ class SalesforceClient:
             result = self.sf.query(query)
             return result.get('records', [])
         except Exception as e:
-            print(f"Error fetching feed for {case_id}: {e}")
+            logger.error(f"Error fetching feed for {case_id}: {e}")
             return []
 
     def get_case_with_status(self, case_number: str) -> Optional[Dict[str, Any]]:
@@ -197,7 +202,7 @@ class SalesforceClient:
                 return result['records'][0]
             return None
         except Exception as e:
-            print(f"Error fetching case with status {case_number}: {e}")
+            logger.error(f"Error fetching case with status {case_number}: {e}")
             return None
 
     def get_case_summary_data(self, case_number: str) -> Optional[Dict[str, Any]]:
@@ -266,7 +271,7 @@ class SalesforceClient:
             result = self.sf.query(query)
             return result.get('records', [])
         except Exception as e:
-            print(f"Error fetching related cases: {e}")
+            logger.error(f"Error fetching related cases: {e}")
             return []
 
     def _escape_soql(self, text: str) -> str:
@@ -291,7 +296,7 @@ class SalesforceClient:
             result = self.sf.query(query)
             return result.get('records', [])
         except Exception as e:
-            print(f"Error fetching articles for case {case_id}: {e}")
+            logger.error(f"Error fetching articles for case {case_id}: {e}")
             return []
 
     def get_comprehensive_case_data(self, case_number: str, depth: str = "full") -> Optional[Dict[str, Any]]:
@@ -465,7 +470,7 @@ class SalesforceClient:
                 'fields': fields
             }
         except Exception as e:
-            print(f"Error describing {object_name}: {e}")
+            logger.error(f"Error describing {object_name}: {e}")
             return {'error': str(e), 'object_name': object_name}
 
     def describe_workflow_objects(self) -> Dict[str, Any]:
@@ -535,7 +540,7 @@ class SalesforceClient:
             
             return emails
         except Exception as e:
-            print(f"Error fetching emails for case {case_id}: {e}")
+            logger.error(f"Error fetching emails for case {case_id}: {e}")
             return []
 
     def draft_case_email(self, case_number: str, message: str) -> Dict[str, Any]:
@@ -592,7 +597,7 @@ class SalesforceClient:
                 'instructions': 'Review this draft. Call send_case_email to send, or revise the message.'
             }
         except Exception as e:
-            print(f"Error drafting email for case {case_number}: {e}")
+            logger.error(f"Error drafting email for case {case_number}: {e}")
             return {'success': False, 'error': str(e)}
 
     def send_case_email(self, case_number: str, subject: str, body: str) -> Dict[str, Any]:
@@ -669,7 +674,7 @@ class SalesforceClient:
                 'message': f'Email sent to {contact_email} and logged to case {case_number}'
             }
         except Exception as e:
-            print(f"Error sending email for case {case_number}: {e}")
+            logger.error(f"Error sending email for case {case_number}: {e}")
             return {'success': False, 'error': str(e)}
 
     # ========== CASE WRITE TOOLS ==========
@@ -711,7 +716,7 @@ class SalesforceClient:
             }
         except Exception as e:
             error_msg = str(e)
-            print(f"Error updating case {case_number}: {e}")
+            logger.error(f"Error updating case {case_number}: {e}")
             return {'success': False, 'error': error_msg}
 
     def add_case_comment(self, case_number: str, comment: str, is_public: bool = False) -> Dict[str, Any]:
@@ -753,7 +758,7 @@ class SalesforceClient:
                 'message': f'{"Public" if is_public else "Internal"} comment added to case {case_number}'
             }
         except Exception as e:
-            print(f"Error adding comment to case {case_number}: {e}")
+            logger.error(f"Error adding comment to case {case_number}: {e}")
             return {'success': False, 'error': str(e)}
 
     # ========== KNOWLEDGE ARTICLE TOOLS ==========
@@ -816,7 +821,7 @@ class SalesforceClient:
                             'KnowledgeArticleId': article_id
                         })
                 except Exception as link_error:
-                    print(f"Warning: Could not link article to case: {link_error}")
+                    logger.warning(f"Could not link article to case: {link_error}")
             
             return {
                 'success': True,
@@ -828,5 +833,5 @@ class SalesforceClient:
                 'message': f'Knowledge Article "{title}" created successfully. Status: Draft (needs publishing).'
             }
         except Exception as e:
-            print(f"Error creating knowledge article: {e}")
+            logger.error(f"Error creating knowledge article: {e}")
             return {'success': False, 'error': str(e)}

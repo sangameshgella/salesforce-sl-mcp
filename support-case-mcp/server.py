@@ -13,10 +13,26 @@ from starlette.responses import Response
 
 from salesforce_client import SalesforceClient
 
+# Configure logging for Railway (stdout with immediate flush)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+# Force flush after each log
+for handler in logging.root.handlers:
+    handler.flush = lambda: sys.stdout.flush()
+
+logger = logging.getLogger("mcp.sse")
+
+# Also configure salesforce_client logger to use same settings
+sf_logger = logging.getLogger("salesforce_client")
+sf_logger.setLevel(logging.DEBUG)
+
 # Initialize Salesforce Client
 sf_client = SalesforceClient()
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("mcp.sse")
 logger.info("MCP VERSION: %s", getattr(mcp, "__version__", "unknown"))
 
 # Initialize Standard MCP Server
