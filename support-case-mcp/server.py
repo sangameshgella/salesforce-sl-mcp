@@ -1,6 +1,7 @@
 import sys
 import logging
 import time
+import time
 from contextlib import asynccontextmanager
 
 import mcp
@@ -1311,6 +1312,17 @@ session_manager = StreamableHTTPSessionManager(server, stateless=True, json_resp
 class McpEndpoint:
     async def __call__(self, scope, receive, send):
         logger.info("MCP REQUEST: %s %s", scope.get("method"), scope.get("path"))
+        # region agent log
+        _debug_log({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H2",
+            "location": "server.py:McpEndpoint",
+            "message": "MCP endpoint hit",
+            "data": {"method": scope.get("method"), "path": scope.get("path")},
+            "timestamp": int(time.time() * 1000)
+        })
+        # endregion
         headers = list(scope.get("headers") or [])
         header_names = {k.lower() for k, _ in headers}
         if b"accept" not in header_names:
@@ -1327,6 +1339,17 @@ class McpEndpoint:
                 body = message.get("body") or b""
                 if body:
                     logger.info("REQUEST BODY: %s", body.decode(errors="replace"))
+                    # region agent log
+                    _debug_log({
+                        "sessionId": "debug-session",
+                        "runId": "run1",
+                        "hypothesisId": "H3",
+                        "location": "server.py:receive_with_log",
+                        "message": "MCP request body received",
+                        "data": {"body_preview": body[:200].decode(errors="replace")},
+                        "timestamp": int(time.time() * 1000)
+                    })
+                    # endregion
             return message
 
         try:
@@ -1352,10 +1375,26 @@ async def handle_home(request: Request):
     return Response("MCP Server Running. Use /mcp endpoint for connection.")
 
 
+async def handle_not_found(request: Request):
+    # region agent log
+    _debug_log({
+        "sessionId": "debug-session",
+        "runId": "run1",
+        "hypothesisId": "H1",
+        "location": "server.py:handle_not_found",
+        "message": "Non-MCP path hit",
+        "data": {"method": request.method, "path": request.url.path},
+        "timestamp": int(time.time() * 1000)
+    })
+    # endregion
+    return Response("Not Found", status_code=404)
+
+
 routes = [
     Route("/mcp", endpoint=McpEndpoint(), methods=["GET", "POST", "DELETE"]),
     Route("/mcp/", endpoint=McpEndpoint(), methods=["GET", "POST", "DELETE"]),
     Route("/", endpoint=handle_home),
+    Route("/{path:path}", endpoint=handle_not_found),
 ]
 
 mcp = Starlette(routes=routes, lifespan=lifespan)

@@ -94,8 +94,7 @@ class SalesforceClient:
             # Use braces match with escaped content
             sosl = f"FIND {{{escaped_query}}} IN ALL FIELDS RETURNING Case(Id, CaseNumber, Subject, Status, Description)"
             
-            with open("debug.log", "a") as f:
-                f.write(f"DEBUG SOSL: {sosl}\n")
+            logger.info(f"DEBUG SOSL: {sosl}")
 
             result = self.sf.search(sosl)
             return result.get('searchRecords', [])
@@ -132,8 +131,7 @@ class SalesforceClient:
                 LIMIT 50
             """
             
-            with open("debug.log", "a") as f:
-                f.write(f"DEBUG SOQL Fuzzy: {query}\n")
+            logger.info(f"DEBUG SOQL Fuzzy: {query}")
             
             result = self.sf.query(query)
             return result.get('records', [])
