@@ -53,44 +53,8 @@ async def list_tools():
     from mcp.types import Tool
     return [
         Tool(
-            name="search",
-            description="Search for support cases by keyword or phrase. Returns matching cases.",
-            inputSchema={
-                "type": "object",
-                "properties": {"query": {"type": "string", "description": "Search query string"}},
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="fetch",
-            description="Fetch full details for a support case by case number.",
-            inputSchema={
-                "type": "object",
-                "properties": {"id": {"type": "string", "description": "Case Number (not Id)"}},
-                "required": ["id"],
-            },
-        ),
-        Tool(
-            name="get_case_details",
-            description="Get FRESH case details from Salesforce by Case Number. ALWAYS call this to get current data - do NOT rely on previous context or cached data. Use when user asks to 'check again', 'refresh', or 'what's the latest'. Returns Subject, Description, Status, and Comments.",
-            inputSchema={
-                "type": "object",
-                "properties": {"case_number": {"type": "string", "description": "The Case Number (not Id)"}},
-                "required": ["case_number"],
-            },
-        ),
-        Tool(
-            name="search_cases",
-            description="Search for support cases using a keyword or phrase. Returns matching cases with snippets.",
-            inputSchema={
-                "type": "object",
-                "properties": {"query_string": {"type": "string", "description": "Keywords to search for"}},
-                "required": ["query_string"],
-            },
-        ),
-        Tool(
             name="case_flow_summary",
-            description="Return a structured JSON summary that covers status review, resolution check, customer communication, reusable outputs, and a visual flow tree.",
+            description="Return a structured JSON summary that covers status review, resolution check, customer communication, reusable outputs, and a visual flow tree. ALWAYS pulls fresh data from Salesforce.",
             inputSchema={
                 "type": "object",
                 "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
@@ -282,94 +246,7 @@ def _build_flow_tree(case_info: dict, tech: dict, metrics: dict) -> list:
 @server.call_tool()
 async def call_tool(name, arguments):
     logger.info("call_tool invoked: %s", name)
-    if name == "search":
-        query = arguments.get("query")
-        results = sf_client.search_cases(query)
-        if not results:
-            return [{"type": "text", "text": "No cases found matching that query.\n\n💡 SUGGESTED: Try different keywords or use 'search_cases' for broader results."}]
-
-        output = []
-        for r in results:
-            output.append(f"{r['CaseNumber']}: {r['Subject']} ({r['Status']})")
-        
-        output.append("")
-        output.append("💡 SUGGESTED NEXT ACTIONS:")
-        output.append("  • fetch: Get full details for any case above")
-        output.append("  • case_flow_summary: Get full case context")
-
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "fetch":
-        case_number = arguments.get("id")
-        case = sf_client.get_case(case_number)
-        if not case:
-            return [{"type": "text", "text": f"Case {case_number} not found."}]
-
-        comments = sf_client.get_case_comments(case['Id'])
-        output = [
-            f"Case: {case['CaseNumber']}",
-            f"Subject: {case['Subject']}",
-            f"Status: {case['Status']}",
-            f"Priority: {case['Priority']}",
-            f"Description: {case['Description']}",
-            "\n--- Recent Comments ---"
-        ]
-        for c in comments:
-            output.append(f"[{c['CreatedDate']}] {c['CreatedBy']['Name']}: {c['CommentBody']}")
-        
-        output.append("")
-        output.append("💡 SUGGESTED NEXT ACTIONS:")
-        output.append(f"  • case_flow_summary: Get full case context")
-
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "get_case_details":
-        case_number = arguments.get("case_number")
-        case = sf_client.get_case(case_number)
-        if not case:
-            return [{"type": "text", "text": f"Case {case_number} not found."}]
-        
-        comments = sf_client.get_case_comments(case['Id'])
-        output = [
-            f"Case: {case['CaseNumber']}",
-            f"Subject: {case['Subject']}",
-            f"Status: {case['Status']}",
-            f"Priority: {case['Priority']}",
-            f"Description: {case['Description']}",
-            "\n--- Recent Comments ---"
-        ]
-        for c in comments:
-            output.append(f"[{c['CreatedDate']}] {c['CreatedBy']['Name']}: {c['CommentBody']}")
-        
-        output.append("")
-        output.append("💡 SUGGESTED NEXT ACTIONS:")
-        output.append(f"  • case_flow_summary: Get full case context")
-            
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "search_cases":
-        query = arguments.get("query_string")
-        results = sf_client.search_cases(query)
-        if not results:
-            return [{"type": "text", "text": "No cases found matching that query.\n\n💡 SUGGESTED: Try broader keywords or check spelling."}]
-        
-        output = [f"Found {len(results)} cases:"]
-        for r in results:
-            desc_snippet = (r.get('Description') or "")[:100].replace('\n', ' ')
-            if len(r.get('Description') or "") > 100:
-                desc_snippet += "..."
-            output.append(f"- [{r['CaseNumber']}] {r['Subject']} ({r['Status']})")
-            if desc_snippet:
-                 output.append(f"  Snippet: {desc_snippet}")
-        
-        output.append("")
-        output.append("💡 SUGGESTED NEXT ACTIONS:")
-        output.append("  • get_case_details: Get full details for a specific case")
-        output.append("  • case_flow_summary: Get full case context for any case")
-        
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "case_flow_summary":
+    if name == "case_flow_summary":
         case_number = arguments.get("case_number")
         data = sf_client.get_comprehensive_case_data(case_number, "full")
         if not data:
@@ -480,6 +357,7 @@ async def call_tool(name, arguments):
         }
         
         response = {
+            "data_source": "salesforce",
             "case_number": case_info.get("CaseNumber"),
             "status_review": status_review,
             "resolution_check": resolution_check,
