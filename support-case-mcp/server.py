@@ -144,12 +144,12 @@ async def list_tools():
         # === AGENTIC TOOLS ===
         Tool(
             name="analyze_case",
-            description="Get comprehensive case analysis with FRESH data from Salesforce. Includes case details, emails, comments, history, related articles, and AI-generated insights. ALWAYS fetches latest data - never uses cached information. Use this for a complete understanding of any case or when user wants current status.",
+            description="Get comprehensive case analysis with FRESH data from Salesforce. Includes case details, comments, history, related articles, and AI-generated insights. ALWAYS fetches latest data - never uses cached information. Use this for a complete understanding of any case or when user wants current status.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"},
-                    "depth": {"type": "string", "description": "Analysis depth: 'quick' for basic info, 'full' for complete data including emails", "enum": ["quick", "full"], "default": "full"}
+                    "depth": {"type": "string", "description": "Analysis depth: 'quick' for basic info, 'full' for complete data", "enum": ["quick", "full"], "default": "full"}
                 },
                 "required": ["case_number"],
             },
@@ -197,60 +197,23 @@ async def list_tools():
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "object_name": {"type": "string", "description": "Salesforce object API name (e.g., 'Case', 'CaseComment', 'EmailMessage')"}
+                    "object_name": {"type": "string", "description": "Salesforce object API name (e.g., 'Case', 'CaseComment')"}
                 },
                 "required": ["object_name"],
             },
         ),
         Tool(
             name="describe_workflow_objects",
-            description="Get field metadata for ALL objects in the support case workflow (Case, CaseComment, EmailMessage, Knowledge). Call this at the start of a session or before complex multi-object operations to understand all available fields and valid values across the workflow.",
+            description="Get field metadata for ALL objects in the support case workflow (Case, CaseComment, Knowledge). Call this at the start of a session or before complex multi-object operations to understand all available fields and valid values across the workflow.",
             inputSchema={
                 "type": "object",
                 "properties": {},
             },
         ),
-        # ========== EMAIL TOOLS ==========
-        Tool(
-            name="get_case_emails",
-            description="Fetch all email messages linked to a case. Returns the complete email thread with sender, recipient, subject, body, and date. Use this to understand customer communication history before drafting a response.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "case_number": {"type": "string", "description": "The Case Number"}
-                },
-                "required": ["case_number"],
-            },
-        ),
-        Tool(
-            name="draft_case_email",
-            description="Create a draft email preview for user approval. Does NOT send the email. Use this BEFORE send_case_email to show the user what will be sent. Returns draft with recipient, subject, and body for review.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "case_number": {"type": "string", "description": "The Case Number to respond to"},
-                    "message": {"type": "string", "description": "The email body content"}
-                },
-                "required": ["case_number", "message"],
-            },
-        ),
-        Tool(
-            name="send_case_email",
-            description="Send an email to the case contact via Apex Email Services. ONLY call this AFTER user approves a draft. The email is ACTUALLY SENT (not just logged) and recorded in case activity. Returns success status AND contextual next_actions suggesting what to do next (e.g., create KBA, close case).",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "case_number": {"type": "string", "description": "The Case Number"},
-                    "subject": {"type": "string", "description": "Email subject line"},
-                    "body": {"type": "string", "description": "Email body content"}
-                },
-                "required": ["case_number", "subject", "body"],
-            },
-        ),
         # ========== CASE WRITE TOOLS ==========
         Tool(
             name="update_case",
-            description="Update case fields. MUST call describe_sobject('Case') first to get valid field names and picklist values. Returns success status AND contextual next_actions - after closing a case, suggests sending closure email and creating KBA. Always present these next actions to the user.",
+            description="Update case fields. MUST call describe_sobject('Case') first to get valid field names and picklist values. Returns success status AND contextual next_actions - after closing a case, suggests creating a KBA and documenting the closure. Always present these next actions to the user.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -262,7 +225,7 @@ async def list_tools():
         ),
         Tool(
             name="add_case_comment",
-            description="Add a comment to a case. Use for internal notes (is_public=false) or customer-visible responses (is_public=true). Returns success status AND contextual next_actions suggesting follow-up steps like sending email or updating status.",
+            description="Add a comment to a case. Use for internal notes (is_public=false) or customer-visible responses (is_public=true). Returns success status AND contextual next_actions suggesting follow-up steps like updating status or creating a KBA.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1052,129 +1015,6 @@ Case Reference: {case_info['CaseNumber']}"""
         
         output.append("")
         output.append("Use describe_sobject for detailed field info on any object.")
-        
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    # ========== EMAIL TOOL HANDLERS ==========
-    
-    elif name == "get_case_emails":
-        case_number = arguments.get("case_number")
-        case = sf_client.get_case(case_number)
-        if not case:
-            return [{"type": "text", "text": f"Case {case_number} not found."}]
-        
-        emails = sf_client.get_case_emails(case['Id'])
-        if not emails:
-            return [{"type": "text", "text": f"No emails found for case {case_number}."}]
-        
-        output = [f"=== Email Thread for Case {case_number} ===", f"Total: {len(emails)} emails", ""]
-        
-        for i, email in enumerate(emails, 1):
-            direction = email['direction'].upper()
-            output.append(f"[{i}] [{direction}] {email['date']}")
-            output.append(f"    From: {email['from']}")
-            output.append(f"    To: {email['to']}")
-            output.append(f"    Subject: {email['subject']}")
-            body_preview = (email['body'] or '')[:300].replace('\n', ' ')
-            if len(email['body'] or '') > 300:
-                body_preview += "..."
-            output.append(f"    Body: {body_preview}")
-            output.append("")
-        
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "draft_case_email":
-        case_number = arguments.get("case_number")
-        message = arguments.get("message")
-        
-        if not message:
-            return [{"type": "text", "text": "Error: message is required."}]
-        
-        result = sf_client.draft_case_email(case_number, message)
-        
-        if not result['success']:
-            return [{"type": "text", "text": f"Error: {result['error']}"}]
-        
-        output = [
-            "=== DRAFT EMAIL (Review Before Sending) ===",
-            "",
-            f"To: {result['to_name']} <{result['to_email']}>",
-            f"Subject: {result['subject']}",
-            "",
-            "--- Body ---",
-            result['body'],
-            "--- End ---",
-            "",
-            "⚠️ This is a DRAFT. Call send_case_email to send this email.",
-            "   Or modify the message and call draft_case_email again."
-        ]
-        
-        return [{"type": "text", "text": "\n".join(output)}]
-
-    elif name == "send_case_email":
-        case_number = arguments.get("case_number")
-        subject = arguments.get("subject")
-        body = arguments.get("body")
-        
-        # region agent log
-        _debug_log({
-            "sessionId": "debug-session",
-            "runId": "run1",
-            "hypothesisId": "H1",
-            "location": "server.py:send_case_email",
-            "message": "send_case_email args received",
-            "data": {
-                "case_number_present": bool(case_number),
-                "subject_present": bool(subject),
-                "body_present": bool(body)
-            },
-            "timestamp": int(time.time() * 1000)
-        })
-        # endregion
-        
-        if not all([subject, body]):
-            return [{"type": "text", "text": "Error: subject and body are required."}]
-        
-        # region agent log
-        _debug_log({
-            "sessionId": "debug-session",
-            "runId": "run1",
-            "hypothesisId": "H2",
-            "location": "server.py:send_case_email",
-            "message": "send_case_email validated args",
-            "data": {"case_number": case_number},
-            "timestamp": int(time.time() * 1000)
-        })
-        # endregion
-        
-        result = sf_client.send_case_email(case_number, subject, body)
-        
-        # region agent log
-        _debug_log({
-            "sessionId": "debug-session",
-            "runId": "run1",
-            "hypothesisId": "H3",
-            "location": "server.py:send_case_email",
-            "message": "send_case_email result",
-            "data": {"success": result.get("success"), "error": result.get("error")},
-            "timestamp": int(time.time() * 1000)
-        })
-        # endregion
-        
-        if not result['success']:
-            return [{"type": "text", "text": f"Error sending email: {result['error']}"}]
-        
-        output = [
-            "✅ EMAIL SENT SUCCESSFULLY",
-            "",
-            f"Case: {result['case_number']}",
-            f"Sent to: {result['sent_to']}",
-            f"Subject: {result['subject']}",
-            "",
-            "The email has been logged to the case automatically.",
-            "",
-            "💡 SUGGESTED: Add a case comment to log this action."
-        ]
         
         return [{"type": "text", "text": "\n".join(output)}]
 

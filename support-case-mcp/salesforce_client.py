@@ -364,20 +364,18 @@ class SalesforceClient:
             }
             return result
         
-        # Full mode: get everything including emails
+        # Full mode: get everything
         history = self.get_case_history(case_id)
         comments = self.get_case_comments(case_id)
         feed = self.get_case_feed(case_id)
         related = self.get_related_cases(case_id, case['Subject'])
         articles = self.get_case_articles(case_id)
-        emails = self.get_case_emails(case_id)
         
         result['history'] = history[:10]
         result['recent_comments'] = comments[:5]
         result['feed_items'] = feed[:10]
         result['related_cases'] = related[:5]
         result['knowledge_articles'] = articles
-        result['emails'] = emails[:10]  # Last 10 emails
         
         # Calculate metrics for insights
         result['metrics'] = {
@@ -385,7 +383,6 @@ class SalesforceClient:
             'total_history_changes': len(history),
             'related_cases_count': len(related),
             'articles_count': len(articles),
-            'email_count': len(emails),
             'has_recent_activity': days_since_update is not None and days_since_update < 7,
             'days_since_update': days_since_update
         }
@@ -478,12 +475,12 @@ class SalesforceClient:
         """
         Get metadata for all objects in the support case workflow.
         
-        Describes: Case, CaseComment, EmailMessage, Knowledge__kav
+        Describes: Case, CaseComment, Knowledge__kav
         
         Returns:
             Dictionary with metadata for each workflow object
         """
-        workflow_objects = ['Case', 'CaseComment', 'EmailMessage']
+        workflow_objects = ['Case', 'CaseComment']
         
         result = {}
         for obj_name in workflow_objects:
@@ -496,212 +493,6 @@ class SalesforceClient:
             result['Knowledge__kav'] = {'error': 'Knowledge not enabled in this org'}
         
         return result
-
-    # ========== EMAIL TOOLS ==========
-
-    def get_case_emails(self, case_id: str) -> List[Dict[str, Any]]:
-        """
-        Fetch all email messages linked to a case.
-        
-        Returns emails for AI summarization and drafting context.
-        
-        Args:
-            case_id: The Salesforce Case Id
-            
-        Returns:
-            List of email messages with sender, recipient, subject, body, date
-        """
-        self.connect()
-        try:
-            query = f"""
-                SELECT Id, Subject, TextBody, HtmlBody, FromAddress, ToAddress, 
-                       CcAddress, BccAddress, MessageDate, Incoming, Status,
-                       CreatedDate, CreatedById
-                FROM EmailMessage 
-                WHERE RelatedToId = '{case_id}' 
-                ORDER BY MessageDate DESC
-                LIMIT 50
-            """
-            result = self.sf.query(query)
-            
-            # Format for cleaner output
-            emails = []
-            for email in result.get('records', []):
-                emails.append({
-                    'id': email.get('Id'),
-                    'subject': email.get('Subject'),
-                    'from': email.get('FromAddress'),
-                    'to': email.get('ToAddress'),
-                    'cc': email.get('CcAddress'),
-                    'date': email.get('MessageDate'),
-                    'direction': 'inbound' if email.get('Incoming') else 'outbound',
-                    'body': email.get('TextBody') or email.get('HtmlBody', ''),
-                    'status': email.get('Status')
-                })
-            
-            return emails
-        except Exception as e:
-            logger.error(f"Error fetching emails for case {case_id}: {e}")
-            return []
-
-    def draft_case_email(self, case_number: str, message: str) -> Dict[str, Any]:
-        """
-        Create a draft email preview for user approval (does NOT send).
-        
-        This enables the LLM to show the user what will be sent before sending.
-        
-        Args:
-            case_number: The case to respond to
-            message: The email body content
-            
-        Returns:
-            Draft preview with recipient, subject, body for user approval
-        """
-        self.connect()
-        try:
-            # Get case with contact info
-            query = f"""
-                SELECT Id, CaseNumber, Subject, Contact.Email, Contact.Name
-                FROM Case 
-                WHERE CaseNumber = '{case_number}' 
-                LIMIT 1
-            """
-            result = self.sf.query(query)
-            
-            if result['totalSize'] == 0:
-                return {'success': False, 'error': f'Case {case_number} not found'}
-            
-            case = result['records'][0]
-            contact = case.get('Contact', {}) or {}
-            contact_email = contact.get('Email')
-            contact_name = contact.get('Name', 'Customer')
-            
-            if not contact_email:
-                return {
-                    'success': False, 
-                    'error': 'No contact email found for this case',
-                    'case_number': case_number
-                }
-            
-            # Generate email subject
-            subject = f"Re: Case {case['CaseNumber']} - {case['Subject']}"
-            
-            return {
-                'success': True,
-                'draft': True,
-                'case_number': case_number,
-                'case_id': case['Id'],
-                'to_email': contact_email,
-                'to_name': contact_name,
-                'subject': subject,
-                'body': message,
-                'instructions': 'Review this draft. Call send_case_email to send, or revise the message.'
-            }
-        except Exception as e:
-            logger.error(f"Error drafting email for case {case_number}: {e}")
-            return {'success': False, 'error': str(e)}
-
-    def send_case_email(self, case_number: str, subject: str, body: str) -> Dict[str, Any]:
-        """
-        Send an email to the case contact via Apex Email Services.
-        
-        The email is actually sent (not just logged) via custom Apex REST endpoint.
-        Only call this AFTER user has approved the draft.
-        
-        Args:
-            case_number: The case to respond to
-            subject: Email subject
-            body: Email body content
-            
-        Returns:
-            Confirmation of email sent with contextual next actions
-        """
-        self.connect()
-        try:
-            # Get case with contact info and status
-            query = f"""
-                SELECT Id, CaseNumber, Status, Contact.Email, Contact.Name
-                FROM Case 
-                WHERE CaseNumber = '{case_number}' 
-                LIMIT 1
-            """
-            result = self.sf.query(query)
-            
-            if result['totalSize'] == 0:
-                return {'success': False, 'error': f'Case {case_number} not found'}
-            
-            case = result['records'][0]
-            contact = case.get('Contact', {}) or {}
-            contact_email = contact.get('Email')
-            case_status = case.get('Status', '')
-            
-            if not contact_email:
-                return {
-                    'success': False, 
-                    'error': 'No contact email found for this case'
-                }
-            
-            # Send email via custom Apex REST endpoint (actually sends the email)
-            email_payload = {
-                'toAddress': contact_email,
-                'subject': subject,
-                'body': body,
-                'caseId': case['Id']
-            }
-            
-            try:
-                # Call custom Apex REST endpoint
-                response = self.sf.restful('sendEmail', method='POST', data=email_payload)
-                
-                # Parse response if it's a string
-                if isinstance(response, str):
-                    import json
-                    response = json.loads(response)
-                
-                if not response.get('success', False):
-                    return {
-                        'success': False,
-                        'error': response.get('error', 'Failed to send email via Apex')
-                    }
-                    
-            except Exception as apex_error:
-                logger.warning(f"Apex email endpoint not available, falling back to EmailMessage: {apex_error}")
-                # Fallback: Create EmailMessage record (logs but doesn't send)
-                email_record = {
-                    'RelatedToId': case['Id'],
-                    'ToAddress': contact_email,
-                    'Subject': subject,
-                    'TextBody': body,
-                    'Status': '3',  # Sent
-                    'Incoming': False
-                }
-                self.sf.EmailMessage.create(email_record)
-            
-            # Determine next actions based on case status
-            if case_status in ['Closed', 'Resolved']:
-                next_actions = [
-                    "Create Knowledge Article from this resolution",
-                    "Workflow may be complete - case is already closed"
-                ]
-            else:
-                next_actions = [
-                    "Update case status if issue is resolved",
-                    "Create Knowledge Article if resolution is reusable",
-                    "Add internal note about the email sent"
-                ]
-            
-            return {
-                'success': True,
-                'case_number': case_number,
-                'case_id': case['Id'],
-                'sent_to': contact_email,
-                'subject': subject,
-                'message': f'Email sent to {contact_email} and logged to case {case_number}',
-                'next_actions': next_actions
-            }
-        except Exception as e:
-            logger.error(f"Error sending email for case {case_number}: {e}")
-            return {'success': False, 'error': str(e)}
 
     # ========== CASE WRITE TOOLS ==========
 
@@ -738,21 +529,18 @@ class SalesforceClient:
             if new_status in ['Closed', 'Resolved']:
                 # Case closure workflow
                 next_actions = [
-                    "Send closure notification email to customer",
                     "Create Knowledge Article from this resolution",
                     "Add final internal summary comment"
                 ]
             elif 'Fix_Status__c' in fields or 'Validation_Status__c' in fields:
                 # Technical status update
                 next_actions = [
-                    "Send status update email to customer",
                     "Add internal note about the progress",
                     "Close the case if issue is fully resolved"
                 ]
             else:
                 # General update
                 next_actions = [
-                    "Send update to customer if needed",
                     "Add internal note about the change",
                     "Update case status if appropriate"
                 ]
@@ -804,13 +592,11 @@ class SalesforceClient:
             # Determine next actions based on comment type
             if is_public:
                 next_actions = [
-                    "Send email notification to customer about the update",
                     "Update case status if appropriate",
                     "Close the case if issue is resolved"
                 ]
             else:
                 next_actions = [
-                    "Send update to customer if they need to be informed",
                     "Update case status or technical fields",
                     "Add more details or follow-up notes if needed"
                 ]
@@ -930,7 +716,7 @@ class SalesforceClient:
                 next_actions = [
                     "Workflow complete - case has KBA linked, no further actions required",
                     "Optionally: Close the case if not already closed",
-                    "Optionally: Send closure email to customer"
+                    "Optionally: Add final internal summary comment"
                 ]
             else:
                 next_actions = [
