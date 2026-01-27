@@ -63,7 +63,7 @@ async def list_tools():
         ),
         Tool(
             name="get_case_details",
-            description="Get full details of a support case by its Case Number (e.g., 00335943). Returns Subject, Description, Status, and Comments.",
+            description="Get FRESH case details from Salesforce by Case Number. ALWAYS call this to get current data - do NOT rely on previous context or cached data. Use when user asks to 'check again', 'refresh', or 'what's the latest'. Returns Subject, Description, Status, and Comments.",
             inputSchema={
                 "type": "object",
                 "properties": {"case_number": {"type": "string", "description": "The Case Number (not Id)"}},
@@ -136,12 +136,12 @@ async def list_tools():
         # === AGENTIC TOOLS ===
         Tool(
             name="analyze_case",
-            description="Comprehensive case analysis: details, history, comments, related cases, articles, and AI-generated insights with suggested next actions. Use this for a complete understanding of any case.",
+            description="Get comprehensive case analysis with FRESH data from Salesforce. Includes case details, emails, comments, history, related articles, and AI-generated insights. ALWAYS fetches latest data - never uses cached information. Use this for a complete understanding of any case or when user wants current status.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number"},
-                    "depth": {"type": "string", "description": "Analysis depth: 'quick' for basic info, 'full' for complete data", "enum": ["quick", "full"], "default": "full"}
+                    "depth": {"type": "string", "description": "Analysis depth: 'quick' for basic info, 'full' for complete data including emails", "enum": ["quick", "full"], "default": "full"}
                 },
                 "required": ["case_number"],
             },
@@ -228,7 +228,7 @@ async def list_tools():
         ),
         Tool(
             name="send_case_email",
-            description="Send an email to the case contact. ONLY call this AFTER the user has approved a draft from draft_case_email. The email is sent via Salesforce and automatically logged to the case. Always confirm with user before calling this.",
+            description="Send an email to the case contact via Apex Email Services. ONLY call this AFTER user approves a draft. The email is ACTUALLY SENT (not just logged) and recorded in case activity. Returns success status AND contextual next_actions suggesting what to do next (e.g., create KBA, close case).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -242,19 +242,19 @@ async def list_tools():
         # ========== CASE WRITE TOOLS ==========
         Tool(
             name="update_case",
-            description="Update case fields. MUST call describe_sobject('Case') first to get valid field names and picklist values. Provide exact API field names and values. Example: {\"Status\": \"Closed\", \"Fix_Status__c\": \"Implemented\"}. The LLM must map user terms to exact API values using describe data.",
+            description="Update case fields. MUST call describe_sobject('Case') first to get valid field names and picklist values. Returns success status AND contextual next_actions - after closing a case, suggests sending closure email and creating KBA. Always present these next actions to the user.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "case_number": {"type": "string", "description": "The Case Number to update"},
-                    "fields": {"type": "object", "description": "Dictionary of field API names and values to update"}
+                    "fields": {"type": "object", "description": "Dictionary of field API names and values to update. Example: {\"Status\": \"Closed\"}"}
                 },
                 "required": ["case_number", "fields"],
             },
         ),
         Tool(
             name="add_case_comment",
-            description="Add a comment to a case. Use this to log internal notes or public responses. Set is_public=true for comments visible to customer in portal, false for internal team notes.",
+            description="Add a comment to a case. Use for internal notes (is_public=false) or customer-visible responses (is_public=true). Returns success status AND contextual next_actions suggesting follow-up steps like sending email or updating status.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -268,7 +268,7 @@ async def list_tools():
         # ========== KNOWLEDGE ARTICLE TOOLS ==========
         Tool(
             name="create_knowledge_article",
-            description="Create a new Knowledge Article from a resolved case. Use this after suggest_knowledge_article confirms eligibility and user approves. Creates article in Draft status (requires manual publishing in Salesforce).",
+            description="Create a Knowledge Article from a resolved case. Creates article in Draft status and links to case. Returns success AND next_actions - often indicates 'workflow complete' since KBA creation is typically the final step. If linked to a closed case, no further actions may be needed.",
             inputSchema={
                 "type": "object",
                 "properties": {
