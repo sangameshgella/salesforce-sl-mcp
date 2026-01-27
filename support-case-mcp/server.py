@@ -1,5 +1,6 @@
 import sys
 import logging
+import time
 from contextlib import asynccontextmanager
 
 import mcp
@@ -34,6 +35,12 @@ sf_logger.setLevel(logging.DEBUG)
 # Initialize Salesforce Client
 sf_client = SalesforceClient()
 logger.info("MCP VERSION: %s", getattr(mcp, "__version__", "unknown"))
+
+def _debug_log(payload: dict) -> None:
+    try:
+        logger.info("DEBUG_LOG %s", payload)
+    except Exception:
+        pass
 
 # Initialize Standard MCP Server
 server = Server("support-case-mcp")
@@ -1108,10 +1115,50 @@ Case Reference: {case_info['CaseNumber']}"""
         subject = arguments.get("subject")
         body = arguments.get("body")
         
+        # region agent log
+        _debug_log({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H1",
+            "location": "server.py:send_case_email",
+            "message": "send_case_email args received",
+            "data": {
+                "case_number_present": bool(case_number),
+                "subject_present": bool(subject),
+                "body_present": bool(body)
+            },
+            "timestamp": int(time.time() * 1000)
+        })
+        # endregion
+        
         if not all([subject, body]):
             return [{"type": "text", "text": "Error: subject and body are required."}]
         
+        # region agent log
+        _debug_log({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H2",
+            "location": "server.py:send_case_email",
+            "message": "send_case_email validated args",
+            "data": {"case_number": case_number},
+            "timestamp": int(time.time() * 1000)
+        })
+        # endregion
+        
         result = sf_client.send_case_email(case_number, subject, body)
+        
+        # region agent log
+        _debug_log({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H3",
+            "location": "server.py:send_case_email",
+            "message": "send_case_email result",
+            "data": {"success": result.get("success"), "error": result.get("error")},
+            "timestamp": int(time.time() * 1000)
+        })
+        # endregion
         
         if not result['success']:
             return [{"type": "text", "text": f"Error sending email: {result['error']}"}]
@@ -1136,10 +1183,50 @@ Case Reference: {case_info['CaseNumber']}"""
         case_number = arguments.get("case_number")
         fields = arguments.get("fields")
         
+        # region agent log
+        _debug_log({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H4",
+            "location": "server.py:update_case",
+            "message": "update_case args received",
+            "data": {
+                "case_number_present": bool(case_number),
+                "fields_type": type(fields).__name__,
+                "fields_keys": list(fields.keys()) if isinstance(fields, dict) else None
+            },
+            "timestamp": int(time.time() * 1000)
+        })
+        # endregion
+        
         if not fields or not isinstance(fields, dict):
             return [{"type": "text", "text": "Error: fields must be a dictionary of field names and values."}]
         
+        # region agent log
+        _debug_log({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H5",
+            "location": "server.py:update_case",
+            "message": "update_case validated fields",
+            "data": {"case_number": case_number, "fields_count": len(fields)},
+            "timestamp": int(time.time() * 1000)
+        })
+        # endregion
+        
         result = sf_client.update_case(case_number, fields)
+        
+        # region agent log
+        _debug_log({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H6",
+            "location": "server.py:update_case",
+            "message": "update_case result",
+            "data": {"success": result.get("success"), "error": result.get("error")},
+            "timestamp": int(time.time() * 1000)
+        })
+        # endregion
         
         if not result['success']:
             return [{"type": "text", "text": f"Error updating case: {result['error']}"}]
