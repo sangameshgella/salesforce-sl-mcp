@@ -183,6 +183,24 @@ class SalesforceClient:
             logger.error(f"Error fetching feed for {case_id}: {e}")
             return []
 
+    def get_case_emails(self, case_id: str) -> List[Dict[str, Any]]:
+        """Fetch email messages related to the case"""
+        self.connect()
+        try:
+            query = f"""
+                SELECT Subject, FromAddress, ToAddress, CcAddress, BccAddress,
+                       TextBody, HtmlBody, CreatedDate, MessageDate, Incoming
+                FROM EmailMessage
+                WHERE ParentId = '{case_id}'
+                ORDER BY CreatedDate DESC
+                LIMIT 20
+            """
+            result = self.sf.query(query)
+            return result.get('records', [])
+        except Exception as e:
+            logger.error(f"Error fetching emails for {case_id}: {e}")
+            return []
+
     def get_case_with_status(self, case_number: str) -> Optional[Dict[str, Any]]:
         """Get case with custom status fields for fix/validation tracking"""
         self.connect()
@@ -213,6 +231,7 @@ class SalesforceClient:
         history = self.get_case_history(case_id)
         comments = self.get_case_comments(case_id)
         feed = self.get_case_feed(case_id)
+        emails = self.get_case_emails(case_id)
         
         # Determine closure readiness based on status fields
         fix_status = case.get('Fix_Status__c', '')
@@ -243,7 +262,8 @@ class SalesforceClient:
             },
             'history': history[:10],  # Last 10 changes
             'recent_comments': comments[:5],  # Last 5 comments
-            'feed_items': feed[:10]  # Last 10 feed items
+            'feed_items': feed[:10],  # Last 10 feed items
+            'emails': emails[:5]  # Last 5 emails
         }
 
     def get_related_cases(self, case_id: str, subject: str) -> List[Dict[str, Any]]:
@@ -368,12 +388,14 @@ class SalesforceClient:
         history = self.get_case_history(case_id)
         comments = self.get_case_comments(case_id)
         feed = self.get_case_feed(case_id)
+        emails = self.get_case_emails(case_id)
         related = self.get_related_cases(case_id, case['Subject'])
         articles = self.get_case_articles(case_id)
         
         result['history'] = history[:10]
         result['recent_comments'] = comments[:5]
         result['feed_items'] = feed[:10]
+        result['emails'] = emails[:10]
         result['related_cases'] = related[:5]
         result['knowledge_articles'] = articles
         
@@ -384,7 +406,8 @@ class SalesforceClient:
             'related_cases_count': len(related),
             'articles_count': len(articles),
             'has_recent_activity': days_since_update is not None and days_since_update < 7,
-            'days_since_update': days_since_update
+            'days_since_update': days_since_update,
+            'emails_count': len(emails)
         }
         
         # Risk factors
