@@ -51,7 +51,7 @@ server = Server("support-case-mcp")
 async def list_tools():
     logger.info("list_tools invoked")
     from mcp.types import Tool
-    return [
+    tools = [
         Tool(
             name="case_flow_summary",
             description="Return a structured JSON summary that covers status review, resolution check, customer communication, reusable outputs, and a visual flow tree. ALWAYS pulls fresh data from Salesforce.",
@@ -132,6 +132,8 @@ async def list_tools():
             },
         ),
     ]
+    logger.info("list_tools response: %s", [t.name for t in tools])
+    return tools
 
 def _add_suggestions(text: str, suggestions: list) -> list:
     """Helper to format response with suggested next actions"""
