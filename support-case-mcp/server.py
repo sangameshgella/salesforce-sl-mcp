@@ -641,6 +641,10 @@ class McpEndpoint:
             "timestamp": int(time.time() * 1000)
         })
         # endregion
+        method = scope.get("method")
+        if method in ("OPTIONS", "HEAD"):
+            await Response("", status_code=204)(scope, receive, send)
+            return
         headers = list(scope.get("headers") or [])
         header_names = {k.lower() for k, _ in headers}
         if b"accept" not in header_names:
@@ -656,22 +660,36 @@ class McpEndpoint:
             if message.get("type") == "http.request":
                 body = message.get("body") or b""
                 if body:
-                    logger.info("REQUEST BODY: %s", body.decode(errors="replace"))
-                    # region agent log
-                    _debug_log({
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "H3",
-                        "location": "server.py:receive_with_log",
-                        "message": "MCP request body received",
-                        "data": {"body_preview": body[:200].decode(errors="replace")},
-                        "timestamp": int(time.time() * 1000)
-                    })
-                    # endregion
+                    logger.info("REQUEST BODY (preview): %s", body[:500].decode(errors="replace"))
+                # region agent log
+                _debug_log({
+                    "sessionId": "debug-session",
+                    "runId": "run1",
+                    "hypothesisId": "H3",
+                    "location": "server.py:receive_with_log",
+                    "message": "MCP request body received",
+                    "data": {"body_preview": body[:200].decode(errors="replace")},
+                    "timestamp": int(time.time() * 1000)
+                })
+                # endregion
             return message
 
+        start_time = time.time()
         try:
-            await session_manager.handle_request(scope, receive_with_log, send)
+            if method == "GET":
+                await session_manager.handle_request(scope, receive_with_log, send)
+            else:
+                await asyncio.wait_for(
+                    session_manager.handle_request(scope, receive_with_log, send),
+                    timeout=25.0
+                )
+        except asyncio.TimeoutError:
+            logger.error(
+                "MCP request timed out: method=%s path=%s",
+                scope.get("method"),
+                scope.get("path")
+            )
+            await Response("MCP request timed out", status_code=504)(scope, receive, send)
         except Exception:
             logger.exception(
                 "mcp_app error: method=%s path=%s headers=%s",
@@ -680,6 +698,14 @@ class McpEndpoint:
                 [(k.decode(), v.decode()) for k, v in headers],
             )
             raise
+        finally:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "MCP request completed in %sms: %s %s",
+                duration_ms,
+                scope.get("method"),
+                scope.get("path")
+            )
 
 
 @asynccontextmanager

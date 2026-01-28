@@ -342,17 +342,38 @@ class SalesforceClient:
         """Get knowledge articles linked to a case"""
         self.connect()
         try:
-            # Query CaseArticle junction object
+            # Query CaseArticle junction object for master article ids
             query = f"""
-                SELECT KnowledgeArticleId, 
-                       KnowledgeArticle.Title,
-                       KnowledgeArticle.UrlName
+                SELECT KnowledgeArticleId
                 FROM CaseArticle
                 WHERE CaseId = '{case_id}'
                 LIMIT 10
             """
             result = self.sf.query(query)
-            return result.get('records', [])
+            records = result.get('records', [])
+            article_ids = [r.get("KnowledgeArticleId") for r in records if r.get("KnowledgeArticleId")]
+            if not article_ids:
+                return []
+
+            # Prefer Knowledge__kav (commonly used in Knowledge orgs), fall back to KnowledgeArticleVersion
+            ids_csv = ", ".join([f"'{aid}'" for aid in article_ids])
+            kav_query = f"""
+                SELECT KnowledgeArticleId, Title, UrlName, Summary, LastModifiedDate
+                FROM Knowledge__kav
+                WHERE KnowledgeArticleId IN ({ids_csv})
+            """
+            try:
+                kav_result = self.sf.query(kav_query)
+                return kav_result.get("records", [])
+            except Exception as e:
+                logger.warning(f"Knowledge__kav query failed, falling back to KnowledgeArticleVersion: {e}")
+                kav_fallback_query = f"""
+                    SELECT KnowledgeArticleId, Title, UrlName, Summary, LastModifiedDate
+                    FROM KnowledgeArticleVersion
+                    WHERE KnowledgeArticleId IN ({ids_csv})
+                """
+                fallback_result = self.sf.query(kav_fallback_query)
+                return fallback_result.get("records", [])
         except Exception as e:
             logger.error(f"Error fetching articles for case {case_id}: {e}")
             return []
