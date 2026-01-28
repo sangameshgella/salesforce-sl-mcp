@@ -673,14 +673,20 @@ class McpEndpoint:
                 })
                 # endregion
             return message
+        
+        async def send_with_log(message):
+            if message.get("type") == "http.response.start":
+                status = message.get("status")
+                logger.info("MCP RESPONSE STATUS: %s %s %s", status, method, scope.get("path"))
+            await send(message)
 
         start_time = time.time()
         try:
             if method == "GET":
-                await session_manager.handle_request(scope, receive_with_log, send)
+                await session_manager.handle_request(scope, receive_with_log, send_with_log)
             else:
                 await asyncio.wait_for(
-                    session_manager.handle_request(scope, receive_with_log, send),
+                    session_manager.handle_request(scope, receive_with_log, send_with_log),
                     timeout=25.0
                 )
         except asyncio.TimeoutError:
