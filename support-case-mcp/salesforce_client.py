@@ -139,6 +139,46 @@ class SalesforceClient:
             logger.error(f"Error in fuzzy SOQL search: {e}")
             return []
 
+    def search_knowledge_articles(self, subject: str, description: str) -> List[Dict[str, Any]]:
+        """
+        Search knowledge articles using SOSL based on subject + description.
+        Returns a concise list of article records.
+        """
+        self.connect()
+        try:
+            combined = " ".join([subject or "", description or ""]).strip()
+            if not combined:
+                return []
+
+            # Limit search size to avoid SOSL length issues
+            combined = combined[:400]
+            escaped_query = self._escape_sosl(combined)
+            sosl = (
+                "FIND {{{query}}} IN ALL FIELDS RETURNING "
+                "Knowledge__kav(Id, Title, UrlName, Summary, LastModifiedDate), "
+                "KnowledgeArticleVersion(Id, Title, UrlName, Summary, LastModifiedDate)"
+            ).format(query=escaped_query)
+
+            logger.info(f"DEBUG SOSL Knowledge: {sosl}")
+            result = self.sf.search(sosl)
+            records = result.get("searchRecords", [])
+
+            articles = []
+            for r in records:
+                attrs = r.get("attributes", {})
+                articles.append({
+                    "id": r.get("Id"),
+                    "title": r.get("Title"),
+                    "url_name": r.get("UrlName"),
+                    "summary": r.get("Summary"),
+                    "last_modified_date": r.get("LastModifiedDate"),
+                    "object_type": attrs.get("type")
+                })
+            return articles
+        except Exception as e:
+            logger.error(f"Error searching knowledge articles: {e}")
+            return []
+
     def get_case_comments(self, case_id: str) -> List[Dict[str, Any]]:
         self.connect()
         try:

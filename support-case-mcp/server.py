@@ -260,7 +260,10 @@ async def call_tool(name, arguments):
         feed_items = data.get("feed_items", [])
         emails = data.get("emails", [])
         related_cases = data.get("related_cases", [])
-        knowledge_articles = data.get("knowledge_articles", [])
+        knowledge_articles = sf_client.search_knowledge_articles(
+            case_info.get("Subject", ""),
+            case_info.get("Description", "")
+        )
         risk_factors = data.get("risk_factors", [])
         
         def _snippet(text: str, limit: int = 300) -> str:
@@ -538,6 +541,15 @@ Case Reference: {case_info['CaseNumber']}"""
         
         output.append("")
         output.append("💡 SUGGESTED: Add a comment to document this change.")
+
+        status_value = fields.get("Status") if isinstance(fields, dict) else None
+        if status_value is not None:
+            normalized_status = str(status_value).strip().lower()
+            kba_status_keywords = ["done", "completed", "complete", "resolved", "closed"]
+            if any(keyword in normalized_status for keyword in kba_status_keywords):
+                output.append("")
+                output.append("📝 KNOWLEDGE ARTICLE")
+                output.append("Would you like to create a Knowledge Article for this resolved case?")
         
         return [{"type": "text", "text": "\n".join(output)}]
 
