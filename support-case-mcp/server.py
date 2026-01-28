@@ -542,7 +542,15 @@ Case Reference: {case_info['CaseNumber']}"""
         output.append("")
         output.append("💡 SUGGESTED: Add a comment to document this change.")
 
-        status_value = fields.get("Status") if isinstance(fields, dict) else None
+        status_value = None
+        if isinstance(fields, dict):
+            if "Status" in fields:
+                status_value = fields.get("Status")
+            else:
+                for key in fields.keys():
+                    if str(key).strip().lower() == "status":
+                        status_value = fields.get(key)
+                        break
         if status_value is not None:
             normalized_status = str(status_value).strip().lower()
             kba_status_keywords = ["done", "completed", "complete", "resolved", "closed"]
