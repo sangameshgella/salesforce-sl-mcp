@@ -1,8 +1,8 @@
 import sys
 import logging
 import time
-import time
 import json
+import asyncio
 from contextlib import asynccontextmanager
 
 import mcp
@@ -248,7 +248,7 @@ async def call_tool(name, arguments):
     logger.info("call_tool invoked: %s", name)
     if name == "case_flow_summary":
         case_number = arguments.get("case_number")
-        data = sf_client.get_comprehensive_case_data(case_number, "full")
+        data = await asyncio.to_thread(sf_client.get_comprehensive_case_data, case_number, "full")
         if not data:
             return [{"type": "text", "text": f"Case {case_number} not found."}]
         
@@ -260,7 +260,8 @@ async def call_tool(name, arguments):
         feed_items = data.get("feed_items", [])
         emails = data.get("emails", [])
         related_cases = data.get("related_cases", [])
-        knowledge_articles = sf_client.search_knowledge_articles(
+        knowledge_articles = await asyncio.to_thread(
+            sf_client.search_knowledge_articles,
             case_info.get("Subject", ""),
             case_info.get("Description", "")
         )
@@ -373,7 +374,7 @@ async def call_tool(name, arguments):
 
     elif name == "suggest_knowledge_article":
         case_number = arguments.get("case_number")
-        summary_data = sf_client.get_case_summary_data(case_number)
+        summary_data = await asyncio.to_thread(sf_client.get_case_summary_data, case_number)
         if not summary_data:
             return [{"type": "text", "text": f"Case {case_number} not found."}]
         
@@ -421,7 +422,7 @@ Case Reference: {case_info['CaseNumber']}"""
         if not object_name:
             return [{"type": "text", "text": "Error: object_name is required."}]
         
-        result = sf_client.describe_sobject(object_name)
+        result = await asyncio.to_thread(sf_client.describe_sobject, object_name)
         
         if 'error' in result:
             return [{"type": "text", "text": f"Error describing {object_name}: {result['error']}"}]
@@ -457,7 +458,7 @@ Case Reference: {case_info['CaseNumber']}"""
         return [{"type": "text", "text": "\n".join(output)}]
 
     elif name == "describe_workflow_objects":
-        result = sf_client.describe_workflow_objects()
+        result = await asyncio.to_thread(sf_client.describe_workflow_objects)
         
         output = [
             "=== Support Case Workflow Objects ===",
@@ -513,7 +514,7 @@ Case Reference: {case_info['CaseNumber']}"""
         })
         # endregion
         
-        result = sf_client.update_case(case_number, fields)
+        result = await asyncio.to_thread(sf_client.update_case, case_number, fields)
         
         # region agent log
         _debug_log({
@@ -569,7 +570,7 @@ Case Reference: {case_info['CaseNumber']}"""
         if not comment:
             return [{"type": "text", "text": "Error: comment is required."}]
         
-        result = sf_client.add_case_comment(case_number, comment, is_public)
+        result = await asyncio.to_thread(sf_client.add_case_comment, case_number, comment, is_public)
         
         if not result['success']:
             return [{"type": "text", "text": f"Error adding comment: {result['error']}"}]
@@ -596,7 +597,9 @@ Case Reference: {case_info['CaseNumber']}"""
         if not all([title, summary, content]):
             return [{"type": "text", "text": "Error: title, summary, and content are required."}]
         
-        result = sf_client.create_knowledge_article(title, summary, content, case_number=case_number)
+        result = await asyncio.to_thread(
+            lambda: sf_client.create_knowledge_article(title, summary, content, case_number=case_number)
+        )
         
         if not result['success']:
             return [{"type": "text", "text": f"Error creating article: {result['error']}"}]
