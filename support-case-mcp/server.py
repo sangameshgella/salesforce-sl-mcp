@@ -131,6 +131,17 @@ async def list_tools():
                 "required": ["title", "summary", "content"],
             },
         ),
+        Tool(
+            name="case_level2_qa",
+            description="Return Level 2 Q&A for a case when explicitly requested.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_number": {"type": "string", "description": "The Case Number"}
+                },
+                "required": ["case_number"],
+            },
+        ),
     ]
     logger.info("list_tools response: %s", [t.name for t in tools])
     return tools
@@ -266,37 +277,101 @@ def _build_flowchart_mermaid(flow_nodes: list) -> str:
 
     return "\n".join(lines)
 
+def _snippet(text: str, limit: int = 300) -> str:
+    if not text:
+        return ""
+    clean = text.replace("\n", " ").strip()
+    if len(clean) > limit:
+        return clean[:limit] + "..."
+    return clean
+
 @server.call_tool()
 async def call_tool(name, arguments):
     logger.info("call_tool invoked: %s", name)
     if name == "case_flow_summary":
         case_number = arguments.get("case_number")
-        data = await asyncio.to_thread(sf_client.get_comprehensive_case_data, case_number, "full")
-        if not data:
+        case_record = await asyncio.to_thread(sf_client.get_case_with_status, case_number)
+        if not case_record:
             return [{"type": "text", "text": f"Case {case_number} not found."}]
         
-        case_info = data.get("case_info", {})
-        tech = data.get("technical_summary", {})
-        metrics = data.get("metrics", {})
-        history = data.get("history", [])
-        comments = data.get("recent_comments", [])
-        feed_items = data.get("feed_items", [])
-        emails = data.get("emails", [])
-        related_cases = data.get("related_cases", [])
-        knowledge_articles = await asyncio.to_thread(
-            sf_client.search_knowledge_articles,
-            case_info.get("Subject", ""),
-            case_info.get("Description", "")
-        )
-        risk_factors = data.get("risk_factors", [])
+        case_id = case_record["Id"]
+        subject = case_record.get("Subject", "Unknown subject")
+        description = case_record.get("Description", "")
+        status = case_record.get("Status", "Unknown")
+        case_summary_ai = case_record.get("Case_Summary_AI__c") or ""
         
-        def _snippet(text: str, limit: int = 300) -> str:
-            if not text:
-                return ""
-            clean = text.replace("\n", " ").strip()
-            if len(clean) > limit:
-                return clean[:limit] + "..."
-            return clean
+        history_task = asyncio.to_thread(sf_client.get_case_history, case_id)
+        comments_task = asyncio.to_thread(sf_client.get_case_comments, case_id)
+        feed_task = asyncio.to_thread(sf_client.get_case_feed, case_id)
+        emails_task = asyncio.to_thread(sf_client.get_case_emails, case_id)
+        related_task = asyncio.to_thread(sf_client.get_related_cases, case_id, subject)
+        articles_task = asyncio.to_thread(sf_client.get_case_articles, case_id)
+        search_articles_task = asyncio.to_thread(
+            sf_client.search_knowledge_articles,
+            subject,
+            description
+        )
+        
+        history, comments, feed_items, emails, related_cases, case_articles, knowledge_articles = await asyncio.gather(
+            history_task,
+            comments_task,
+            feed_task,
+            emails_task,
+            related_task,
+            articles_task,
+            search_articles_task
+        )
+        
+        case_info = {
+            "CaseNumber": case_record.get("CaseNumber"),
+            "Subject": subject,
+            "Description": description,
+            "Status": status,
+            "Priority": case_record.get("Priority"),
+            "CreatedDate": case_record.get("CreatedDate"),
+            "LastModifiedDate": case_record.get("LastModifiedDate"),
+            "ContactName": case_record.get("Contact", {}).get("Name") if case_record.get("Contact") else None
+        }
+        
+        fix_status = case_record.get("Fix_Status__c", "") or ""
+        validation_status = case_record.get("Validation_Status__c", "") or ""
+        if fix_status == "Implemented" and validation_status == "Completed":
+            closure_readiness = "ready"
+        elif fix_status == "Implemented":
+            closure_readiness = "pending_validation"
+        else:
+            closure_readiness = "in_progress"
+        tech = {
+            "fix_status": fix_status,
+            "validation_status": validation_status,
+            "closure_readiness": closure_readiness
+        }
+        
+        from datetime import datetime
+        last_modified = case_record.get("LastModifiedDate", "")
+        days_since_update = None
+        if last_modified:
+            try:
+                lm_date = datetime.fromisoformat(last_modified.replace("Z", "+00:00"))
+                days_since_update = (datetime.now(lm_date.tzinfo) - lm_date).days
+            except Exception:
+                pass
+        
+        metrics = {
+            "total_comments": len(comments),
+            "total_history_changes": len(history),
+            "related_cases_count": len(related_cases),
+            "articles_count": len(case_articles),
+            "has_recent_activity": days_since_update is not None and days_since_update < 7,
+            "days_since_update": days_since_update,
+            "emails_count": len(emails)
+        }
+        
+        risk_factors = []
+        if days_since_update and days_since_update > 14:
+            risk_factors.append("No activity for 14+ days")
+        if len(comments) == 0:
+            risk_factors.append("No comments on case")
         
         email_summaries = []
         for e in emails[:10]:
@@ -320,11 +395,6 @@ async def call_tool(name, arguments):
                 recurrence_signals.append(rf)
         recurrence_risk = len(recurrence_signals) > 0
         
-        case_summary_ai = case_info.get("Case_Summary_AI__c") or ""
-        subject = case_info.get("Subject", "Unknown subject")
-        description = case_info.get("Description", "")
-        status = case_info.get("Status", "Unknown")
-        
         activity_bits = []
         if feed_items:
             activity_bits.append(_snippet(feed_items[0].get("Body", ""), 140))
@@ -343,11 +413,13 @@ async def call_tool(name, arguments):
             f"{_snippet(description, 220) or 'No description available.'}"
         )
         if case_summary_ai:
-            summary_sentences.append(f"AI summary: {_snippet(case_summary_ai, 220)}")
+            summary_sentences.append(f"{_snippet(case_summary_ai, 220)}")
         elif activity_bits:
             summary_sentences.append(f"Recent activity includes {activity_bits[0]}")
         if len(summary_sentences) < 3 and len(activity_bits) > 1:
-            summary_sentences.append(f"Additional context: {activity_bits[1]}")
+            summary_sentences.append(f"Additional context includes {activity_bits[1]}")
+        if len(summary_sentences) < 2:
+            summary_sentences.append("No additional activity was recorded recently.")
         
         case_summary = " ".join(summary_sentences[:3]).strip()
         
@@ -389,6 +461,14 @@ async def call_tool(name, arguments):
                 "url_name": article.get("url_name"),
                 "summary": _snippet(article.get("summary"), 220)
             })
+        for article in case_articles[:3]:
+            troubleshooting_recommendations.append({
+                "type": "linked_knowledge_article",
+                "id": article.get("KnowledgeArticleId"),
+                "title": article.get("Title"),
+                "url_name": article.get("UrlName"),
+                "summary": _snippet(article.get("Summary"), 220)
+            })
         for related in related_cases[:3]:
             troubleshooting_recommendations.append({
                 "type": "related_case",
@@ -413,23 +493,6 @@ async def call_tool(name, arguments):
         if not actions:
             actions.append("Add a brief internal update summarizing progress.")
         
-        level2_qa = [
-            {
-                "question": "Why is this case still open if the fix is already implemented?",
-                "answer": (
-                    f"The case remains open to ensure post-implementation stability through monitoring. "
-                    f"{'Case summary: ' + _snippet(case_summary_ai, 220) if case_summary_ai else ''}".strip()
-                )
-            },
-            {
-                "question": "What was done to validate the fix?",
-                "answer": (
-                    f"Testing was completed after implementation and monitoring is ongoing. "
-                    f"{'Case summary: ' + _snippet(case_summary_ai, 220) if case_summary_ai else ''}".strip()
-                )
-            }
-        ]
-        
         flow_nodes = _build_flow_tree(case_info, tech, metrics)
         visual_tree = {
             "mermaid": _build_flowchart_mermaid(flow_nodes),
@@ -448,11 +511,46 @@ async def call_tool(name, arguments):
             "technical_summary": technical_summary,
             "troubleshooting_recommendations": troubleshooting_recommendations,
             "actions": actions,
-            "level2_qa": level2_qa,
             "visual_tree": visual_tree
         }
         
         return [{"type": "text", "text": json.dumps(response, indent=2)}]
+
+    elif name == "case_level2_qa":
+        case_number = arguments.get("case_number")
+        case_record = await asyncio.to_thread(sf_client.get_case_with_status, case_number)
+        if not case_record:
+            return [{"type": "text", "text": f"Case {case_number} not found."}]
+        
+        case_summary_ai = case_record.get("Case_Summary_AI__c") or ""
+        fix_status = (case_record.get("Fix_Status__c") or "").lower()
+        validation_status = (case_record.get("Validation_Status__c") or "").lower()
+        monitoring_phrase = "monitoring is ongoing"
+        if fix_status != "implemented":
+            monitoring_phrase = "monitoring will begin after implementation"
+        
+        answer_suffix = f" Case summary: {_snippet(case_summary_ai, 220)}" if case_summary_ai else ""
+        
+        level2_qa = [
+            {
+                "question": "Why is this case still open if the fix is already implemented?",
+                "answer": f"The case remains open to ensure post-implementation stability through monitoring. {answer_suffix}".strip()
+            },
+            {
+                "question": "What was done to validate the fix?",
+                "answer": (
+                    f"Testing was completed after implementation and {monitoring_phrase}. "
+                    f"{answer_suffix}".strip()
+                )
+            }
+        ]
+        
+        if validation_status != "completed":
+            level2_qa[1]["answer"] = (
+                f"Validation is still in progress and {monitoring_phrase}. {answer_suffix}".strip()
+            )
+        
+        return [{"type": "text", "text": json.dumps({"level2_qa": level2_qa}, indent=2)}]
 
     elif name == "suggest_knowledge_article":
         case_number = arguments.get("case_number")
