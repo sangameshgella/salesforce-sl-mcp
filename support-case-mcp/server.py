@@ -505,13 +505,28 @@ async def call_tool(name, arguments):
             ]
         }
         
-        response = {
-            "case_summary_prompt": case_summary_prompt,
+        response_format_prompt = (
+            "Using the provided JSON, output the response in this order and format:\n"
+            "1. Case Summarization & Contextualization: 2 to 3 sentence paragraph.\n"
+            "2. Technical Case Summary: labeled lines (Issue Type, Fix Status, Validation Status, "
+            "Current State, Closure Dependency).\n"
+            "3. Troubleshooting / Resolution Recommendation Steps: list of articles/cases.\n"
+            "4. Action: bulleted actions.\n"
+            "Output only these sections and keep them concise."
+        )
+
+        response_format_context = {
             "case_summary_context": case_summary_context,
+            "case_summary_prompt": case_summary_prompt,
             "technical_summary": technical_summary,
             "troubleshooting_recommendations": troubleshooting_recommendations,
             "actions": actions,
             "visual_tree": visual_tree
+        }
+
+        response = {
+            "response_format_prompt": response_format_prompt,
+            "response_format_context": response_format_context
         }
         
         return [{"type": "text", "text": json.dumps(response, indent=2)}]
