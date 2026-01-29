@@ -35,7 +35,7 @@ class SalesforceClient:
         self.connect()
         try:
             # Query for the Case by CaseNumber
-            query = f"SELECT Id, CaseNumber, Subject, Description, Status, Priority, Contact.Name FROM Case WHERE CaseNumber = '{case_number}' LIMIT 1"
+            query = f"SELECT Id, CaseNumber, Subject, Description, Status, Priority, Contact.Name, Case_Summary_AI__c FROM Case WHERE CaseNumber = '{case_number}' LIMIT 1"
             result = self.sf.query(query)
             
             if result['totalSize'] > 0:
@@ -247,7 +247,7 @@ class SalesforceClient:
         try:
             query = f"""
                 SELECT Id, CaseNumber, Subject, Description, Status, Priority, 
-                       Contact.Name, CreatedDate, LastModifiedDate,
+                       Contact.Name, CreatedDate, LastModifiedDate, Case_Summary_AI__c,
                        Fix_Status__c, Validation_Status__c
                 FROM Case 
                 WHERE CaseNumber = '{case_number}' 

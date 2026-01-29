@@ -245,6 +245,27 @@ def _build_flow_tree(case_info: dict, tech: dict, metrics: dict) -> list:
     ]
     return nodes
 
+def _build_flowchart_mermaid(flow_nodes: list) -> str:
+    lines = ["graph TD"]
+    for node in flow_nodes:
+        node_id = node.get("id")
+        if not node_id:
+            continue
+        label = node.get("label") or node_id.replace("_", " ").title()
+        status = node.get("status") or "pending"
+        if status not in {"complete", "current", "pending"}:
+            status = "pending"
+        safe_label = str(label).replace('"', '\\"')
+        lines.append(f'    {node_id}["{safe_label}\\n({status})"]')
+
+    for index in range(len(flow_nodes) - 1):
+        from_id = flow_nodes[index].get("id")
+        to_id = flow_nodes[index + 1].get("id")
+        if from_id and to_id:
+            lines.append(f"    {from_id} --> {to_id}")
+
+    return "\n".join(lines)
+
 @server.call_tool()
 async def call_tool(name, arguments):
     logger.info("call_tool invoked: %s", name)
@@ -358,8 +379,10 @@ async def call_tool(name, arguments):
             ]
         }
         
+        flow_nodes = _build_flow_tree(case_info, tech, metrics)
         visual_aid = {
-            "issue_flow_tree": _build_flow_tree(case_info, tech, metrics)
+            "issue_flow_tree": flow_nodes,
+            "flowchart_mermaid": _build_flowchart_mermaid(flow_nodes)
         }
         
         response = {
