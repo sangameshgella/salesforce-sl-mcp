@@ -320,79 +320,136 @@ async def call_tool(name, arguments):
                 recurrence_signals.append(rf)
         recurrence_risk = len(recurrence_signals) > 0
         
-        status_review = {
-            "case_info": case_info,
-            "history": history,
-            "recent_comments": comments,
-            "feed_items": feed_items,
-            "emails": email_summaries,
-            "knowledge_articles": knowledge_articles,
-            "related_cases": related_cases,
-            "prior_ai_context": {
-                "available": False,
-                "notes": "No stored AI context found in case data."
+        case_summary_ai = case_info.get("Case_Summary_AI__c") or ""
+        subject = case_info.get("Subject", "Unknown subject")
+        description = case_info.get("Description", "")
+        status = case_info.get("Status", "Unknown")
+        
+        activity_bits = []
+        if feed_items:
+            activity_bits.append(_snippet(feed_items[0].get("Body", ""), 140))
+        if history:
+            first_history = history[0]
+            history_text = f"{first_history.get('Field', 'Field')} changed from {first_history.get('OldValue')} to {first_history.get('NewValue')}"
+            activity_bits.append(_snippet(history_text, 140))
+        if comments:
+            activity_bits.append(_snippet(comments[0].get("CommentBody", ""), 140))
+        if email_summaries:
+            activity_bits.append(_snippet(email_summaries[0].get("body_snippet", ""), 140))
+        
+        summary_sentences = []
+        summary_sentences.append(
+            f"Case {case_info.get('CaseNumber', '')} is {status} with subject '{subject}'. "
+            f"{_snippet(description, 220) or 'No description available.'}"
+        )
+        if case_summary_ai:
+            summary_sentences.append(f"AI summary: {_snippet(case_summary_ai, 220)}")
+        elif activity_bits:
+            summary_sentences.append(f"Recent activity includes {activity_bits[0]}")
+        if len(summary_sentences) < 3 and len(activity_bits) > 1:
+            summary_sentences.append(f"Additional context: {activity_bits[1]}")
+        
+        case_summary = " ".join(summary_sentences[:3]).strip()
+        
+        combined_text = f"{subject} {description}".lower()
+        issue_parts = []
+        if "firmware" in combined_text:
+            issue_parts.append("Firmware")
+        if "sdk" in combined_text:
+            issue_parts.append("SDK runtime behavior")
+        issue_type = " / ".join(issue_parts) if issue_parts else "General case issue"
+        
+        if closure_flags["closure_readiness"] == "ready":
+            current_state = "Monitoring ongoing"
+            closure_dependency = "Stable behavior confirmation"
+        elif closure_flags["closure_readiness"] == "pending_validation":
+            current_state = "Validation in progress"
+            closure_dependency = "Validation completion"
+        else:
+            current_state = "Fix in progress"
+            closure_dependency = "Fix implementation and validation"
+        
+        if case_summary_ai:
+            current_state = _snippet(case_summary_ai, 200)
+        
+        technical_summary = {
+            "issue_type": issue_type,
+            "fix_status": closure_flags["fix_status"],
+            "validation_status": closure_flags["validation_status"],
+            "current_state": current_state,
+            "closure_dependency": closure_dependency
+        }
+        
+        troubleshooting_recommendations = []
+        for article in knowledge_articles[:5]:
+            troubleshooting_recommendations.append({
+                "type": "knowledge_article",
+                "id": article.get("id"),
+                "title": article.get("title"),
+                "url_name": article.get("url_name"),
+                "summary": _snippet(article.get("summary"), 220)
+            })
+        for related in related_cases[:3]:
+            troubleshooting_recommendations.append({
+                "type": "related_case",
+                "case_number": related.get("CaseNumber"),
+                "subject": related.get("Subject"),
+                "status": related.get("Status")
+            })
+        
+        actions = []
+        if closure_flags["fix_status"].lower() != "implemented":
+            actions.append("Confirm fix plan and update Fix Status.")
+        if closure_flags["fix_status"].lower() == "implemented" and closure_flags["validation_status"].lower() != "completed":
+            actions.append("Complete validation and update Validation Status.")
+        if closure_flags["closure_readiness"] == "ready" and status.lower() not in ["closed", "resolved"]:
+            actions.append("Confirm monitoring stability and close the case.")
+        if knowledge_articles:
+            actions.append("Review existing knowledge articles before creating a new one.")
+        if not knowledge_articles and closure_flags["closure_readiness"] == "ready":
+            actions.append("Create a Knowledge Article from the resolution.")
+        if recurrence_risk:
+            actions.append("Review related cases to confirm recurrence patterns.")
+        if not actions:
+            actions.append("Add a brief internal update summarizing progress.")
+        
+        level2_qa = [
+            {
+                "question": "Why is this case still open if the fix is already implemented?",
+                "answer": (
+                    f"The case remains open to ensure post-implementation stability through monitoring. "
+                    f"{'Case summary: ' + _snippet(case_summary_ai, 220) if case_summary_ai else ''}".strip()
+                )
             },
-            "fix_details": {
-                "fix_status": tech.get("fix_status"),
-                "validation_status": tech.get("validation_status")
-            },
-            "testing_results": {
-                "validation_status": tech.get("validation_status"),
-                "ready_for_closure": closure_flags["ready_for_closure"]
-            },
-            "monitoring_data": {
-                "days_since_update": metrics.get("days_since_update"),
-                "has_recent_activity": metrics.get("has_recent_activity"),
-                "risk_factors": risk_factors
+            {
+                "question": "What was done to validate the fix?",
+                "answer": (
+                    f"Testing was completed after implementation and monitoring is ongoing. "
+                    f"{'Case summary: ' + _snippet(case_summary_ai, 220) if case_summary_ai else ''}".strip()
+                )
             }
-        }
+        ]
         
-        resolution_check = {
-            **closure_flags,
-            "recurrence_risk": recurrence_risk,
-            "recurrence_signals": recurrence_signals
-        }
-        
-        customer_communication = _build_customer_comms(case_info, tech)
-        
-        reusable_outputs = {
-            "kba_prompt": _build_kba_prompt(tech),
-            "level1_qa": [
-                {
-                    "question": "What is the current status of this case?",
-                    "answer": f"{case_info.get('Status', 'Unknown')} (closure readiness: {closure_flags['closure_readiness']})"
-                },
-                {
-                    "question": "What has been done so far?",
-                    "answer": f"Fix status: {closure_flags['fix_status']}; Validation: {closure_flags['validation_status']}."
-                }
-            ],
-            "level2_qa": [
-                {
-                    "question": "Is there evidence of recurrence or related incidents?",
-                    "answer": "Yes. " + "; ".join(recurrence_signals) if recurrence_risk else "No related incidents detected."
-                },
-                {
-                    "question": "What is the summary of the issue?",
-                    "answer": _snippet(case_info.get("Description", ""), 500) or "No description available."
-                }
+        flow_nodes = _build_flow_tree(case_info, tech, metrics)
+        visual_tree = {
+            "mermaid": _build_flowchart_mermaid(flow_nodes),
+            "bullets": [
+                "Existing Technical Issue",
+                "Issue Identified",
+                "Fix Implemented",
+                "Testing Completed",
+                "Monitoring",
+                "Case Closure"
             ]
         }
         
-        flow_nodes = _build_flow_tree(case_info, tech, metrics)
-        visual_aid = {
-            "issue_flow_tree": flow_nodes,
-            "flowchart_mermaid": _build_flowchart_mermaid(flow_nodes)
-        }
-        
         response = {
-            "data_source": "salesforce",
-            "case_number": case_info.get("CaseNumber"),
-            "status_review": status_review,
-            "resolution_check": resolution_check,
-            "customer_communication": customer_communication,
-            "reusable_outputs": reusable_outputs,
-            "visual_aid": visual_aid
+            "case_summary": case_summary,
+            "technical_summary": technical_summary,
+            "troubleshooting_recommendations": troubleshooting_recommendations,
+            "actions": actions,
+            "level2_qa": level2_qa,
+            "visual_tree": visual_tree
         }
         
         return [{"type": "text", "text": json.dumps(response, indent=2)}]
@@ -685,7 +742,11 @@ class McpEndpoint:
             if message.get("type") == "http.request":
                 body = message.get("body") or b""
                 if body:
-                    logger.info("REQUEST BODY (preview): %s", body[:500].decode(errors="replace"))
+                    logger.info(
+                        "REQUEST BODY (preview, %s bytes): %s",
+                        len(body),
+                        body[:2000].decode(errors="replace")
+                    )
                 # region agent log
                 _debug_log({
                     "sessionId": "debug-session",
@@ -699,10 +760,24 @@ class McpEndpoint:
                 # endregion
             return message
         
+        response_body = bytearray()
+        response_body_limit = 2000
+
         async def send_with_log(message):
             if message.get("type") == "http.response.start":
                 status = message.get("status")
                 logger.info("MCP RESPONSE STATUS: %s %s %s", status, method, scope.get("path"))
+            if message.get("type") == "http.response.body":
+                body = message.get("body") or b""
+                if body and len(response_body) < response_body_limit:
+                    remaining = response_body_limit - len(response_body)
+                    response_body.extend(body[:remaining])
+                if not message.get("more_body"):
+                    logger.info(
+                        "RESPONSE BODY (preview, %s bytes): %s",
+                        len(response_body),
+                        response_body.decode(errors="replace")
+                    )
             await send(message)
 
         start_time = time.time()
