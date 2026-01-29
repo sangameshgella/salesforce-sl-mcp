@@ -407,21 +407,20 @@ async def call_tool(name, arguments):
         if email_summaries:
             activity_bits.append(_snippet(email_summaries[0].get("body_snippet", ""), 140))
         
-        summary_sentences = []
-        summary_sentences.append(
-            f"Case {case_info.get('CaseNumber', '')} is {status} with subject '{subject}'. "
-            f"{_snippet(description, 220) or 'No description available.'}"
+        case_summary_prompt = (
+            "Using the fields in the JSON, write 2 to 3 concise sentences summarizing the case for an "
+            "internal agent. Output only sentences, no bullets."
         )
-        if case_summary_ai:
-            summary_sentences.append(f"{_snippet(case_summary_ai, 220)}")
-        elif activity_bits:
-            summary_sentences.append(f"Recent activity includes {activity_bits[0]}")
-        if len(summary_sentences) < 3 and len(activity_bits) > 1:
-            summary_sentences.append(f"Additional context includes {activity_bits[1]}")
-        if len(summary_sentences) < 2:
-            summary_sentences.append("No additional activity was recorded recently.")
-        
-        case_summary = " ".join(summary_sentences[:3]).strip()
+        case_summary_context = {
+            "case_info": case_info,
+            "case_summary_ai": case_summary_ai,
+            "recent_activity_snippets": activity_bits[:3],
+            "recent_history": history[:3],
+            "recent_comments": comments[:3],
+            "recent_feed": feed_items[:3],
+            "recent_emails": email_summaries[:3],
+            "metrics": metrics
+        }
         
         combined_text = f"{subject} {description}".lower()
         issue_parts = []
@@ -507,7 +506,8 @@ async def call_tool(name, arguments):
         }
         
         response = {
-            "case_summary": case_summary,
+            "case_summary_prompt": case_summary_prompt,
+            "case_summary_context": case_summary_context,
             "technical_summary": technical_summary,
             "troubleshooting_recommendations": troubleshooting_recommendations,
             "actions": actions,
