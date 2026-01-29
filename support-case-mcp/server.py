@@ -407,10 +407,6 @@ async def call_tool(name, arguments):
         if email_summaries:
             activity_bits.append(_snippet(email_summaries[0].get("body_snippet", ""), 140))
         
-        case_summary_prompt = (
-            "Using the fields in the JSON, write 2 to 3 concise sentences summarizing the case for an "
-            "internal agent. Output only sentences, no bullets."
-        )
         case_summary_context = {
             "case_info": case_info,
             "case_summary_ai": case_summary_ai,
@@ -421,6 +417,10 @@ async def call_tool(name, arguments):
             "recent_emails": email_summaries[:3],
             "metrics": metrics
         }
+        case_summary_prompt = (
+            "Using the fields in the case_summary_context JSON, write 2 to 3 concise sentences summarizing the case for an "
+            "internal agent. Output only sentences, no bullets."
+        )
         
         combined_text = f"{subject} {description}".lower()
         issue_parts = []
