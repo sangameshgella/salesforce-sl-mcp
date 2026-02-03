@@ -57,8 +57,10 @@ async def list_tools():
             description="Return a structured JSON summary that covers status review, resolution check, customer communication, reusable outputs, and a visual flow tree. ALWAYS pulls fresh data from Salesforce.",
             inputSchema={
                 "type": "object",
-                "properties": {"case_number": {"type": "string", "description": "The Case Number"}},
-                "required": ["case_number"],
+                "properties": {
+                    "case_number": {"type": "string", "description": "Exact Case Number if known"},
+                    "query": {"type": "string", "description": "Free-text search terms if case number is unknown"}
+                }
             },
         ),
         Tool(
@@ -289,7 +291,9 @@ def _snippet(text: str, limit: int = 300) -> str:
 async def call_tool(name, arguments):
     logger.info("call_tool invoked: %s", name)
     if name == "case_flow_summary":
-        case_number = arguments.get("case_number")
+        case_number = arguments.get("case_number") or arguments.get("query")
+        if not case_number:
+            return [{"type": "text", "text": "Error: case_number or query is required."}]
         case_record = await asyncio.to_thread(sf_client.get_case_with_status, case_number)
         if not case_record:
             candidates = await asyncio.to_thread(sf_client.search_cases, case_number or "")
@@ -298,12 +302,21 @@ async def call_tool(name, arguments):
                 candidates_list.append({
                     "case_number": c.get("CaseNumber"),
                     "subject": c.get("Subject"),
-                    "status": c.get("Status")
+                    "status": c.get("Status"),
+                    "id": c.get("Id")
                 })
-            response = {
+            response_format_prompt = (
+                "No exact case number was found. Present the candidate cases below and ask the user "
+                "to pick one case_number. Do not ask for any other information."
+            )
+            response_format_context = {
                 "case_found": False,
-                "message": "No exact case number match. Select one of the candidates and re-run case_flow_summary with that case_number.",
+                "input": case_number,
                 "candidates": candidates_list
+            }
+            response = {
+                "response_format_prompt": response_format_prompt,
+                "response_format_context": response_format_context
             }
             return [{"type": "text", "text": json.dumps(response, indent=2)}]
         
