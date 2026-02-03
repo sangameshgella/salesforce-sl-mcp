@@ -525,6 +525,7 @@ async def call_tool(name, arguments):
             "Current State, Closure Dependency).\n"
             "3. Troubleshooting / Resolution Recommendation Steps: list of articles/cases.\n"
             "4. Action: bulleted actions.\n"
+            "Do not ask questions or request missing inputs. Use only the provided JSON.\n"
             "Output only these sections and keep them concise."
         )
 
