@@ -292,7 +292,20 @@ async def call_tool(name, arguments):
         case_number = arguments.get("case_number")
         case_record = await asyncio.to_thread(sf_client.get_case_with_status, case_number)
         if not case_record:
-            return [{"type": "text", "text": f"Case {case_number} not found."}]
+            candidates = await asyncio.to_thread(sf_client.search_cases, case_number or "")
+            candidates_list = []
+            for c in candidates[:10]:
+                candidates_list.append({
+                    "case_number": c.get("CaseNumber"),
+                    "subject": c.get("Subject"),
+                    "status": c.get("Status")
+                })
+            response = {
+                "case_found": False,
+                "message": "No exact case number match. Select one of the candidates and re-run case_flow_summary with that case_number.",
+                "candidates": candidates_list
+            }
+            return [{"type": "text", "text": json.dumps(response, indent=2)}]
         
         case_id = case_record["Id"]
         subject = case_record.get("Subject", "Unknown subject")
