@@ -3,6 +3,7 @@ import logging
 import time
 import json
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 import mcp
@@ -37,6 +38,64 @@ sf_logger.setLevel(logging.DEBUG)
 # Initialize Salesforce Client
 sf_client = SalesforceClient()
 logger.info("MCP VERSION: %s", getattr(mcp, "__version__", "unknown"))
+
+def _header_map(scope: dict) -> dict:
+    headers = {}
+    for key, value in list(scope.get("headers") or []):
+        headers[key.decode().lower()] = value.decode(errors="replace")
+    return headers
+
+def _parse_csv_env(name: str) -> set:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return set()
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+def _extract_identity(headers: dict) -> dict:
+    user = (
+        headers.get("x-forwarded-user")
+        or headers.get("x-auth-request-user")
+        or headers.get("x-forwarded-preferred-username")
+        or headers.get("x-oauth-user")
+    )
+    email = (
+        headers.get("x-forwarded-email")
+        or headers.get("x-auth-request-email")
+        or headers.get("x-oauth-email")
+    )
+    sub = headers.get("x-forwarded-sub") or headers.get("x-auth-request-sub")
+    return {"user": user, "email": email, "sub": sub}
+
+def _identity_allowed(identity: dict) -> tuple[bool, str]:
+    enforce = (os.getenv("MCP_ENFORCE_IDENTITY", "false") or "").lower() == "true"
+    allowed_emails = _parse_csv_env("MCP_ALLOWED_EMAILS")
+    allowed_domains = _parse_csv_env("MCP_ALLOWED_EMAIL_DOMAINS")
+
+    email = (identity.get("email") or "").strip().lower()
+    user = (identity.get("user") or "").strip().lower()
+    principal = email or user
+
+    if not enforce and not allowed_emails and not allowed_domains:
+        return True, ""
+
+    if not principal:
+        return False, "Missing forwarded identity headers from OAuth gateway."
+
+    if allowed_emails and principal in allowed_emails:
+        return True, ""
+
+    if email and allowed_domains:
+        domain = email.split("@")[-1] if "@" in email else ""
+        if domain in allowed_domains:
+            return True, ""
+
+    if enforce and (allowed_emails or allowed_domains):
+        return False, "Authenticated identity is not allowlisted."
+
+    if enforce:
+        return True, ""
+
+    return True, ""
 
 def _debug_log(payload: dict) -> None:
     try:
@@ -852,6 +911,19 @@ session_manager = StreamableHTTPSessionManager(server, stateless=True, json_resp
 class McpEndpoint:
     async def __call__(self, scope, receive, send):
         logger.info("MCP REQUEST: %s %s", scope.get("method"), scope.get("path"))
+        headers_dict = _header_map(scope)
+        identity = _extract_identity(headers_dict)
+        allowed, reason = _identity_allowed(identity)
+        logger.info(
+            "MCP IDENTITY: user=%s email=%s sub=%s",
+            identity.get("user"),
+            identity.get("email"),
+            identity.get("sub"),
+        )
+        if not allowed:
+            logger.warning("MCP request denied: %s", reason)
+            await Response("Forbidden: invalid identity", status_code=403)(scope, receive, send)
+            return
         # region agent log
         _debug_log({
             "sessionId": "debug-session",
