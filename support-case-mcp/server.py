@@ -10,6 +10,7 @@ import mcp
 from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
+from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount, Route
 from starlette.requests import Request
 from starlette.responses import Response
@@ -988,6 +989,13 @@ routes = [
 ]
 
 mcp = Starlette(routes=routes, lifespan=lifespan)
+mcp.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 if __name__ == "__main__":
     import os
